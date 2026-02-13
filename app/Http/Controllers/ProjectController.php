@@ -3,9 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Models\Project;
+use App\Models\User;
+use App\Services\ProjectAccessService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Validation\Rule;
 
 class ProjectController extends Controller
 {
@@ -25,9 +26,21 @@ class ProjectController extends Controller
             ->paginate($perPage);
     }
 
-    public function show(int $projectId)
+    public function show(Request $request, int $projectId, ProjectAccessService $access)
     {
-        return Project::query()->findOrFail($projectId);
+        $user = $request->user();
+
+        if (! $user) {
+            return response()->json(['message' => 'Unauthorized.'], 401);
+        }
+
+        $project = Project::query()->findOrFail($projectId);
+
+        if (! $access->userHasAccess($project, $user)) {
+            return response()->json(['message' => 'Access denied.'], 403);
+        }
+
+        return $project;
     }
 
     public function store(Request $request)
@@ -64,18 +77,21 @@ class ProjectController extends Controller
 
     public function update(Request $request, int $projectId)
     {
+        $user = $request->user();
+
+        if (! $user) {
+            return response()->json(['message' => 'Unauthorized.'], 401);
+        }
+
         $project = Project::query()->findOrFail($projectId);
+
+        if (! $this->isOwner($project, $user)) {
+            return response()->json(['message' => 'Access denied.'], 403);
+        }
 
         $data = $request->validate([
             'name' => ['sometimes', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
-            'owner_id' => ['sometimes', 'integer', 'exists:users,user_id'],
-            'project_path' => [
-                'sometimes',
-                'string',
-                'max:2048',
-                Rule::unique('projects', 'project_path')->ignore($project->project_id, 'project_id'),
-            ],
             'is_public' => ['sometimes', 'boolean'],
         ]);
 
@@ -85,9 +101,21 @@ class ProjectController extends Controller
         return $project;
     }
 
-    public function destroy(int $projectId)
+    public function destroy(Request $request, int $projectId)
     {
+        $user = $request->user();
+
+        if (! $user) {
+            return response()->json(['message' => 'Unauthorized.'], 401);
+        }
+
         $project = Project::query()->findOrFail($projectId);
+
+        if (! $this->isOwner($project, $user)) {
+            return response()->json(['message' => 'Access denied.'], 403);
+        }
+
+        $this->deleteProjectDirectory($project);
         $project->delete();
 
         return response()->noContent();
@@ -140,5 +168,21 @@ class ProjectController extends Controller
         }
 
         return $value;
+    }
+
+    private function isOwner(Project $project, User $user): bool
+    {
+        return (int) $project->owner_id === (int) $user->user_id;
+    }
+
+    private function deleteProjectDirectory(Project $project): void
+    {
+        $projectPath = trim((string) $project->project_path, '/');
+
+        if ($projectPath === '') {
+            return;
+        }
+
+        Storage::disk('local')->deleteDirectory($projectPath);
     }
 }

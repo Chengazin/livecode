@@ -157,7 +157,30 @@ class ForgejoService
             return '';
         }
 
-        return preg_replace('/\s*,\s*/', ' ', $scopes) ?? $scopes;
+        $tokens = preg_split('/[\s,]+/', $scopes, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $normalized = [];
+
+        foreach ($tokens as $token) {
+            $scope = strtolower(trim($token));
+
+            if ($scope === 'read:repo') {
+                $scope = 'read:repository';
+            } elseif ($scope === 'write:repo') {
+                $scope = 'write:repository';
+            } elseif ($scope === 'repo') {
+                $normalized[] = 'read:repository';
+                $normalized[] = 'write:repository';
+                continue;
+            }
+
+            if ($scope !== '') {
+                $normalized[] = $scope;
+            }
+        }
+
+        $normalized = array_values(array_unique($normalized));
+
+        return implode(' ', $normalized);
     }
 
     private function buildErrorMessage(string $prefix, Response $response): string

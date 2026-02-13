@@ -75,7 +75,7 @@ function resolveRedirectPath() {
     return redirect;
   }
 
-  return "/editor";
+  return "/projects";
 }
 
 async function handleSubmit() {

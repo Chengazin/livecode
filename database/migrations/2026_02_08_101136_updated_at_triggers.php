@@ -7,6 +7,10 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (DB::getDriverName() !== 'pgsql') {
+            return;
+        }
+
         DB::unprepared('
             CREATE OR REPLACE FUNCTION update_updated_at_column()
             RETURNS TRIGGER AS $$
@@ -32,6 +36,10 @@ return new class extends Migration
 
     public function down(): void
     {
+        if (DB::getDriverName() !== 'pgsql') {
+            return;
+        }
+
         DB::unprepared('DROP TRIGGER IF EXISTS trigger_projects_updated_at ON projects;');
         DB::unprepared('DROP TRIGGER IF EXISTS trigger_users_updated_at ON users;');
         DB::unprepared('DROP FUNCTION IF EXISTS update_updated_at_column();');

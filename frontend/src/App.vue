@@ -10,8 +10,11 @@
         <RouterLink to="/" class="nav-link" :class="{ active: isRouteActive('/') }">
           {{ t("nav.home") }}
         </RouterLink>
+        <RouterLink to="/projects" class="nav-link" :class="{ active: isRouteActive('/projects') }">
+          {{ t("nav.projects") }}
+        </RouterLink>
         <RouterLink to="/editor" class="nav-link" :class="{ active: isRouteActive('/editor') }">
-          {{ t("nav.editor") }}
+          {{ t("nav.editorSandbox") }}
         </RouterLink>
         <RouterLink v-if="isAdmin" to="/admin" class="nav-link" :class="{ active: isRouteActive('/admin') }">
           {{ t("nav.admin") }}
@@ -102,6 +105,10 @@ const avatarPresetStyle = computed(() => {
 function isRouteActive(path) {
   if (path === "/admin") {
     return route.path.startsWith("/admin");
+  }
+
+  if (path === "/projects") {
+    return route.path.startsWith("/projects");
   }
 
   return route.path === path;

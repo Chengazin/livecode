@@ -7,7 +7,8 @@
         {{ t("home.lead") }}
       </p>
       <div class="actions">
-        <RouterLink to="/editor" class="btn">{{ t("home.openEditor") }}</RouterLink>
+        <RouterLink to="/projects" class="btn">{{ t("home.openProjects") }}</RouterLink>
+        <RouterLink to="/editor" class="btn btn-secondary">{{ t("home.openEditor") }}</RouterLink>
         <RouterLink v-if="!isAuthenticated" to="/register" class="btn btn-secondary">{{ t("home.createAccount") }}</RouterLink>
         <RouterLink v-if="!isAuthenticated" to="/login" class="btn btn-secondary">{{ t("home.login") }}</RouterLink>
         <RouterLink v-if="isAdmin" to="/admin" class="btn btn-ghost">{{ t("home.openAdmin") }}</RouterLink>

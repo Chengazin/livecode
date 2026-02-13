@@ -28,7 +28,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/me/avatar', [ProfileController::class, 'deleteAvatar']);
 
     // Создание проекта: POST /api/projects
-    Route::apiResource('users', UserController::class);
     Route::apiResource('projects', ProjectController::class);
     Route::post('projects/{projectId}/filesystem', [ProjectFilesystemController::class, 'handle']);
     Route::get('projects/{projectId}/filesystem/tree', [ProjectFilesystemController::class, 'tree']);
@@ -45,5 +44,6 @@ Route::middleware('auth:sanctum')->group(function () {
 });
 
 Route::middleware(['auth:sanctum', 'admin'])->group(function () {
+    Route::apiResource('users', UserController::class);
     Route::apiResource('admins', AdminController::class);
 });

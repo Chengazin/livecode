@@ -33,6 +33,10 @@ class ProjectForgejoController extends Controller
             return response()->json(['message' => 'Access denied.'], 403);
         }
 
+        if ((int) $project->owner_id !== (int) $user->user_id) {
+            return response()->json(['message' => 'Only project owner can manage Forgejo settings.'], 403);
+        }
+
         if (! $user->forgejo_access_token) {
             return response()->json(['message' => 'Forgejo is not connected.'], 409);
         }
@@ -71,6 +75,10 @@ class ProjectForgejoController extends Controller
 
         if ($repoFullName === '' || $repoCloneUrl === '') {
             return response()->json(['message' => 'Invalid repository response.'], 502);
+        }
+
+        if (! $this->isTrustedForgejoCloneUrl($repoCloneUrl)) {
+            return response()->json(['message' => 'Repository clone URL does not match configured Forgejo host.'], 502);
         }
 
         if ($permissions !== null && empty($permissions['push'])) {
@@ -115,6 +123,10 @@ class ProjectForgejoController extends Controller
 
         if (! $access->userHasAccess($project, $user)) {
             return response()->json(['message' => 'Access denied.'], 403);
+        }
+
+        if ((int) $project->owner_id !== (int) $user->user_id) {
+            return response()->json(['message' => 'Only project owner can push to Forgejo.'], 403);
         }
 
         if (! $project->git_enabled || ! $project->forgejo_repo_clone_url) {
@@ -188,5 +200,26 @@ class ProjectForgejoController extends Controller
         $value = trim($value, '-');
 
         return $value === '' ? 'project' : $value;
+    }
+
+    private function isTrustedForgejoCloneUrl(string $cloneUrl): bool
+    {
+        $repoParts = parse_url($cloneUrl);
+        $baseParts = parse_url((string) config('services.forgejo.base_url', ''));
+
+        if (! is_array($repoParts) || ! isset($repoParts['scheme'], $repoParts['host'])) {
+            return false;
+        }
+
+        if (! is_array($baseParts) || ! isset($baseParts['scheme'], $baseParts['host'])) {
+            return false;
+        }
+
+        $scheme = strtolower((string) $repoParts['scheme']);
+        if (! in_array($scheme, ['http', 'https'], true)) {
+            return false;
+        }
+
+        return strtolower((string) $repoParts['host']) === strtolower((string) $baseParts['host']);
     }
 }

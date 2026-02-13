@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Project;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
 class UserController extends Controller
@@ -77,6 +79,22 @@ class UserController extends Controller
     public function destroy(int $userId)
     {
         $user = User::query()->findOrFail($userId);
+
+        $projectPaths = Project::query()
+            ->where('owner_id', $user->user_id)
+            ->pluck('project_path')
+            ->filter(fn ($path) => is_string($path) && trim($path) !== '')
+            ->all();
+
+        foreach ($projectPaths as $projectPath) {
+            Storage::disk('local')->deleteDirectory((string) $projectPath);
+        }
+
+        if ($user->avatar_type === 'upload' && $user->avatar_path) {
+            Storage::disk('public')->delete($user->avatar_path);
+        }
+
+        $user->tokens()->delete();
         $user->delete();
 
         return response()->noContent();

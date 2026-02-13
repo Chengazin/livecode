@@ -40,7 +40,8 @@ return [
         'client_id' => env('FORGEJO_CLIENT_ID'),
         'client_secret' => env('FORGEJO_CLIENT_SECRET'),
         'redirect_url' => env('FORGEJO_REDIRECT_URL'),
-        'scopes' => env('FORGEJO_OAUTH_SCOPES', 'read:user,write:repo'),
+        'scopes' => env('FORGEJO_OAUTH_SCOPES', 'read:user,write:user,read:repository,write:repository'),
+        'auto_link_by_email' => (bool) env('FORGEJO_AUTO_LINK_BY_EMAIL', false),
     ],
 
 ];

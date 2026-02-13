@@ -14,8 +14,16 @@
       <aside class="card editor-sidebar">
         <section class="sidebar-block">
           <div class="sidebar-head">
-            <h2>{{ t("editor.workspace") }}</h2>
-            <button class="btn btn-sm btn-secondary" type="button" @click="switchToGuest">{{ t("editor.guestFile") }}</button>
+            <h2>{{ workspaceTitle }}</h2>
+            <button
+              v-if="isProjectRoute"
+              class="btn btn-sm btn-ghost"
+              type="button"
+              @click="goToProjects"
+            >
+              {{ t("editor.backToProjects") }}
+            </button>
+            <button v-else class="btn btn-sm btn-secondary" type="button" @click="switchToGuest">{{ t("editor.guestFile") }}</button>
           </div>
           <p class="muted-text">{{ t("editor.currentFile") }} <code>{{ currentPath }}</code></p>
           <p v-if="!isAuthenticated" class="muted-text">
@@ -24,39 +32,6 @@
             <RouterLink to="/login">{{ t("editor.loginPrompt") }}</RouterLink>
             {{ t("editor.authPromptSuffix") }}
           </p>
-        </section>
-
-        <section v-if="isAuthenticated" class="sidebar-block">
-          <div class="sidebar-head">
-            <h2>{{ t("editor.projects") }}</h2>
-            <button class="btn btn-sm btn-ghost" type="button" :disabled="projectsLoading" @click="loadProjects">
-              {{ projectsLoading ? t("common.loading") : t("common.refresh") }}
-            </button>
-          </div>
-
-          <label class="field field-row">
-            <span>{{ t("editor.selectedProject") }}</span>
-            <select v-model="selectedProjectId">
-              <option value="">{{ t("editor.chooseProject") }}</option>
-              <option v-for="project in projects" :key="project.project_id" :value="String(project.project_id)">
-                {{ project.name }} (#{{ project.project_id }})
-              </option>
-            </select>
-          </label>
-
-          <form class="form-grid compact-form" @submit.prevent="createProject">
-            <label class="field field-row">
-              <span>{{ t("editor.newProject") }}</span>
-              <input v-model.trim="newProject.name" type="text" required maxlength="255" />
-            </label>
-            <label class="field field-row">
-              <span>{{ t("editor.description") }}</span>
-              <input v-model.trim="newProject.description" type="text" maxlength="500" />
-            </label>
-            <button class="btn" type="submit" :disabled="creatingProject">
-              {{ creatingProject ? t("editor.creatingProject") : t("editor.createProject") }}
-            </button>
-          </form>
         </section>
 
         <section v-if="canUseProjectFs" class="sidebar-block">
@@ -208,48 +183,53 @@
           </div>
         </section>
 
-        <section v-if="isAuthenticated" class="sidebar-block">
-          <div class="sidebar-head">
-            <h2>{{ t("editor.forgejo") }}</h2>
-            <button class="btn btn-sm btn-secondary" type="button" :disabled="forgejoBusy" @click="startForgejoConnect">
-              {{ t("editor.connectAccount") }}
-            </button>
-          </div>
+        <section v-if="isAuthenticated && isProjectRoute" class="sidebar-block">
+          <details class="git-accordion">
+            <summary>{{ t("editor.gitWork") }}</summary>
+            <p class="muted-text">{{ t("editor.gitPanelHint") }}</p>
 
-          <form class="form-grid compact-form" @submit.prevent="connectProjectForgejo">
-            <label class="field field-row">
-              <span>{{ t("editor.mode") }}</span>
-              <select v-model="forgejoMode">
-                <option value="create">{{ t("editor.createRepo") }}</option>
-                <option value="existing">{{ t("editor.existingRepo") }}</option>
-              </select>
-            </label>
+            <div class="sidebar-head">
+              <h2>{{ t("editor.forgejo") }}</h2>
+              <button class="btn btn-sm btn-secondary" type="button" :disabled="forgejoBusy" @click="startForgejoConnect">
+                {{ t("editor.connectAccount") }}
+              </button>
+            </div>
 
-            <label v-if="forgejoMode === 'create'" class="field field-row">
-              <span>{{ t("editor.repositoryName") }}</span>
-              <input v-model.trim="forgejoRepoName" type="text" maxlength="255" placeholder="my-project" />
-            </label>
+            <form class="form-grid compact-form" @submit.prevent="connectProjectForgejo">
+              <label class="field field-row">
+                <span>{{ t("editor.mode") }}</span>
+                <select v-model="forgejoMode">
+                  <option value="create">{{ t("editor.createRepo") }}</option>
+                  <option value="existing">{{ t("editor.existingRepo") }}</option>
+                </select>
+              </label>
 
-            <label v-if="forgejoMode === 'existing'" class="field">
-              <span>{{ t("editor.owner") }}</span>
-              <input v-model.trim="forgejoOwner" type="text" maxlength="255" placeholder="team-or-user" />
-            </label>
+              <label v-if="forgejoMode === 'create'" class="field field-row">
+                <span>{{ t("editor.repositoryName") }}</span>
+                <input v-model.trim="forgejoRepoName" type="text" maxlength="255" placeholder="my-project" />
+              </label>
 
-            <label v-if="forgejoMode === 'existing'" class="field">
-              <span>{{ t("editor.repo") }}</span>
-              <input v-model.trim="forgejoRepo" type="text" maxlength="255" placeholder="repo-name" />
-            </label>
+              <label v-if="forgejoMode === 'existing'" class="field">
+                <span>{{ t("editor.owner") }}</span>
+                <input v-model.trim="forgejoOwner" type="text" maxlength="255" placeholder="team-or-user" />
+              </label>
 
-            <button class="btn" type="submit" :disabled="forgejoBusy || !selectedProjectId">{{ t("editor.connectProjectRepo") }}</button>
-          </form>
+              <label v-if="forgejoMode === 'existing'" class="field">
+                <span>{{ t("editor.repo") }}</span>
+                <input v-model.trim="forgejoRepo" type="text" maxlength="255" placeholder="repo-name" />
+              </label>
 
-          <form class="form-grid compact-form" @submit.prevent="pushToForgejo">
-            <label class="field field-row">
-              <span>{{ t("editor.commitMessage") }}</span>
-              <input v-model.trim="forgejoMessage" type="text" maxlength="255" :placeholder="t('editor.manualSavePlaceholder')" />
-            </label>
-            <button class="btn btn-secondary" type="submit" :disabled="forgejoBusy || !selectedProjectId">{{ t("editor.pushToForgejo") }}</button>
-          </form>
+              <button class="btn" type="submit" :disabled="forgejoBusy || !selectedProjectId">{{ t("editor.connectProjectRepo") }}</button>
+            </form>
+
+            <form class="form-grid compact-form" @submit.prevent="pushToForgejo">
+              <label class="field field-row">
+                <span>{{ t("editor.commitMessage") }}</span>
+                <input v-model.trim="forgejoMessage" type="text" maxlength="255" :placeholder="t('editor.manualSavePlaceholder')" />
+              </label>
+              <button class="btn btn-secondary" type="submit" :disabled="forgejoBusy || !selectedProjectId">{{ t("editor.pushToForgejo") }}</button>
+            </form>
+          </details>
         </section>
       </aside>
 
@@ -258,7 +238,7 @@
           <div class="editor-toolbar-main">
             <strong>{{ currentPath }}</strong>
             <span class="muted-text">
-              {{ isProjectMode ? t("editor.toolbarProject", { id: selectedProjectId }) : t("editor.toolbarGuest") }}
+              {{ toolbarContextLabel }}
             </span>
           </div>
 
@@ -279,7 +259,7 @@
 
             <button class="btn btn-secondary" type="button" @click="downloadFile">{{ t("editor.downloadFile") }}</button>
             <button class="btn" type="button" :disabled="saving" @click="saveFile">
-              {{ saving ? t("common.saving") : isProjectMode ? t("editor.saveToProject") : t("editor.saveLocal") }}
+              {{ saving ? t("common.saving") : isProjectRoute ? t("editor.saveToProject") : t("editor.saveLocal") }}
             </button>
           </div>
         </div>
@@ -319,10 +299,11 @@ const router = useRouter();
 const { t } = useI18n();
 
 const GUEST_KEY = "livecode.editor.guest";
-const LAST_PROJECT_KEY = "livecode.editor.last_project";
+const FORGEJO_RETURN_KEY = "livecode.forgejo.return_path";
 
 const session = ref(getSession());
 const isAuthenticated = computed(() => Boolean(session.value.accessToken));
+const isProjectRoute = computed(() => Boolean(route.params.projectId));
 
 const languageOptions = [
   { value: "javascript", label: "JavaScript" },
@@ -360,10 +341,8 @@ const isProjectMode = ref(false);
 const activeProjectPath = ref("");
 const dirty = ref(false);
 
-const projects = ref([]);
 const selectedProjectId = ref("");
-const projectsLoading = ref(false);
-const creatingProject = ref(false);
+const projectName = ref("");
 const tree = ref([]);
 const treeLoading = ref(false);
 const expanded = ref([]);
@@ -377,7 +356,6 @@ const selectedTreeType = ref("");
 const downloadBusy = ref(false);
 const downloadingScope = ref("");
 
-const newProject = reactive({ name: "", description: "" });
 const newNodeKind = ref("");
 const newNodePath = ref("");
 const newNodeInput = ref(null);
@@ -394,12 +372,34 @@ const forgejoMessage = ref("");
 const notice = ref("");
 const error = ref("");
 
-const canUseProjectFs = computed(() => isAuthenticated.value && Boolean(selectedProjectId.value));
+const canUseProjectFs = computed(() => isAuthenticated.value && isProjectRoute.value && Boolean(selectedProjectId.value));
 const canDownloadSelectedFolder = computed(() => {
   return canUseProjectFs.value && selectedTreeType.value === "folder" && Boolean(selectedTreePath.value);
 });
 const canMoveSelectedToRoot = computed(() => {
   return canUseProjectFs.value && selectedTreeType.value !== "root" && Boolean(selectedTreePath.value);
+});
+const workspaceTitle = computed(() => {
+  if (!isProjectRoute.value) {
+    return t("editor.workspace");
+  }
+
+  if (projectName.value) {
+    return projectName.value;
+  }
+
+  return t("editor.toolbarProject", { id: selectedProjectId.value });
+});
+const toolbarContextLabel = computed(() => {
+  if (!isProjectRoute.value) {
+    return t("editor.toolbarGuest");
+  }
+
+  if (projectName.value) {
+    return projectName.value;
+  }
+
+  return t("editor.toolbarProject", { id: selectedProjectId.value });
 });
 
 const flatTree = computed(() => {
@@ -497,22 +497,6 @@ function restoreGuest() {
   }
 }
 
-function rememberProject(projectId) {
-  try {
-    window.localStorage.setItem(LAST_PROJECT_KEY, String(projectId || ""));
-  } catch (_e) {
-    // ignore
-  }
-}
-
-function readRememberedProject() {
-  try {
-    return window.localStorage.getItem(LAST_PROJECT_KEY) || "";
-  } catch (_e) {
-    return "";
-  }
-}
-
 function isExpanded(path) {
   return expanded.value.includes(path);
 }
@@ -542,6 +526,16 @@ function firstFile(items) {
       if (nested) {
         return nested;
       }
+    }
+  }
+
+  return "";
+}
+
+function firstRootFile(items) {
+  for (const item of items) {
+    if (item.type === "file") {
+      return item.path;
     }
   }
 
@@ -785,6 +779,83 @@ function switchToGuest() {
   syncEditor();
 }
 
+function clearProjectEditor() {
+  isProjectMode.value = false;
+  activeProjectPath.value = "";
+  currentPath.value = "";
+  currentText.value = "";
+  dirty.value = false;
+  syncEditor();
+}
+
+function resolveDefaultEditorTheme() {
+  const preference = typeof session.value?.user?.theme === "string" ? session.value.user.theme.trim() : "";
+  if (preference === "dark") {
+    return "tomorrow_night";
+  }
+
+  if (preference === "light") {
+    return "github";
+  }
+
+  if (typeof document === "undefined") {
+    return "github";
+  }
+
+  const effectiveTheme = document.documentElement.getAttribute("data-theme");
+  return effectiveTheme === "dark" ? "tomorrow_night" : "github";
+}
+
+function syncProjectIdFromRoute() {
+  if (!isProjectRoute.value) {
+    selectedProjectId.value = "";
+    return;
+  }
+
+  const raw = route.params.projectId;
+  const value = typeof raw === "string" ? raw.trim() : "";
+  selectedProjectId.value = /^\d+$/.test(value) ? value : "";
+}
+
+async function loadProjectName() {
+  if (!isProjectRoute.value || !isAuthenticated.value || !selectedProjectId.value) {
+    projectName.value = "";
+    return;
+  }
+
+  const requestedId = selectedProjectId.value;
+
+  try {
+    const response = await request({
+      method: "GET",
+      path: `/projects/${requestedId}`,
+      auth: true,
+    });
+
+    const name = typeof response.data?.name === "string" ? response.data.name.trim() : "";
+    if (selectedProjectId.value === requestedId) {
+      projectName.value = name;
+    }
+  } catch (_error) {
+    if (selectedProjectId.value === requestedId) {
+      projectName.value = "";
+    }
+  }
+}
+
+async function goToProjects() {
+  await router.push("/projects");
+}
+
+function resetProjectTreeState() {
+  tree.value = [];
+  expanded.value = [];
+  selectedTreePath.value = "";
+  selectedTreeType.value = "";
+  cancelCreateNode();
+  resetDragState();
+}
+
 function startCreateNode(kind) {
   if (!canUseProjectFs.value || nodeBusy.value) {
     return;
@@ -831,40 +902,6 @@ async function submitCreateNode() {
   }
 }
 
-async function loadProjects() {
-  if (!isAuthenticated.value) {
-    return;
-  }
-
-  projectsLoading.value = true;
-  error.value = "";
-
-  try {
-    const response = await request({
-      method: "GET",
-      path: "/projects",
-      query: { per_page: 200 },
-      auth: true,
-    });
-
-    projects.value = Array.isArray(response.data?.data) ? response.data.data : [];
-
-    if (!selectedProjectId.value) {
-      const remembered = readRememberedProject();
-      const selected = projects.value.find((project) => String(project.project_id) === remembered);
-      selectedProjectId.value = selected
-        ? String(selected.project_id)
-        : projects.value[0]
-          ? String(projects.value[0].project_id)
-          : "";
-    }
-  } catch (loadError) {
-    error.value = readError(loadError);
-  } finally {
-    projectsLoading.value = false;
-  }
-}
-
 async function loadTree() {
   if (!canUseProjectFs.value) {
     tree.value = [];
@@ -888,52 +925,24 @@ async function loadTree() {
       selectedTreeType.value = "";
     }
 
-    if (isProjectMode.value && activeProjectPath.value && !hasPath(activeProjectPath.value, tree.value)) {
-      const first = firstFile(tree.value);
+    const hasActiveProjectFile =
+      isProjectMode.value &&
+      activeProjectPath.value &&
+      hasPath(activeProjectPath.value, tree.value);
+
+    if (!hasActiveProjectFile) {
+      const first = firstRootFile(tree.value) || firstFile(tree.value);
+
       if (first) {
         await openFile(first);
       } else {
-        switchToGuest();
+        clearProjectEditor();
       }
     }
   } catch (treeError) {
     error.value = readError(treeError);
   } finally {
     treeLoading.value = false;
-  }
-}
-
-async function createProject() {
-  if (!isAuthenticated.value) {
-    return;
-  }
-
-  creatingProject.value = true;
-  error.value = "";
-  notice.value = "";
-
-  try {
-    const response = await request({
-      method: "POST",
-      path: "/projects",
-      auth: true,
-      body: {
-        name: newProject.name,
-        description: newProject.description || null,
-        is_public: false,
-      },
-    });
-
-    projects.value = [response.data, ...projects.value];
-    selectedProjectId.value = String(response.data.project_id);
-    rememberProject(response.data.project_id);
-    newProject.name = "";
-    newProject.description = "";
-    notice.value = t("editor.projectCreated");
-  } catch (createError) {
-    error.value = readError(createError);
-  } finally {
-    creatingProject.value = false;
   }
 }
 
@@ -1098,7 +1107,7 @@ async function removeTreeItem(item) {
     }
 
     if (isProjectMode.value && (activeProjectPath.value === item.path || activeProjectPath.value.startsWith(`${item.path}/`))) {
-      switchToGuest();
+      clearProjectEditor();
     }
 
     await loadTree();
@@ -1118,7 +1127,7 @@ async function saveFile() {
     return;
   }
 
-  if (!isProjectMode.value) {
+  if (!isProjectRoute.value) {
     guest.path = currentPath.value;
     guest.content = currentText.value;
     persistGuest();
@@ -1189,6 +1198,12 @@ async function startForgejoConnect() {
       throw new Error(t("common.requestFailed"));
     }
 
+    try {
+      window.localStorage.setItem(FORGEJO_RETURN_KEY, route.fullPath || "/projects");
+    } catch (_error) {
+      // ignore storage limitations
+    }
+
     window.location.assign(authUrl);
   } catch (connectError) {
     error.value = readError(connectError);
@@ -1218,7 +1233,6 @@ async function connectProjectForgejo() {
     });
 
     notice.value = t("editor.connectedRepo");
-    await loadProjects();
   } catch (connectError) {
     error.value = readError(connectError);
   } finally {
@@ -1258,19 +1272,34 @@ async function pushToForgejo() {
 function onAuthChanged() {
   session.value = getSession();
 
-  if (isAuthenticated.value) {
-    void loadProjects();
+  if (!isAuthenticated.value) {
+    selectedProjectId.value = "";
+    projectName.value = "";
+    resetProjectTreeState();
+    switchToGuest();
     return;
   }
 
-  selectedProjectId.value = "";
-  projects.value = [];
-  tree.value = [];
-  expanded.value = [];
-  selectedTreePath.value = "";
-  selectedTreeType.value = "";
-  cancelCreateNode();
-  switchToGuest();
+  if (!isProjectRoute.value) {
+    selectedProjectId.value = "";
+    projectName.value = "";
+    resetProjectTreeState();
+    return;
+  }
+
+  if (!selectedProjectId.value) {
+    projectName.value = "";
+    resetProjectTreeState();
+    switchToGuest();
+    return;
+  }
+
+  if (!isProjectMode.value || !activeProjectPath.value) {
+    clearProjectEditor();
+  }
+
+  void loadProjectName();
+  void loadTree();
 }
 
 function parseDownloadFileName(disposition, fallbackName) {
@@ -1418,22 +1447,46 @@ watch(editorTheme, (value) => {
 });
 
 watch(selectedProjectId, (value) => {
-  rememberProject(value);
-  cancelCreateNode();
-  if (!value) {
-    tree.value = [];
-    selectedTreePath.value = "";
-    selectedTreeType.value = "";
+  if (!value || !isProjectRoute.value || !isAuthenticated.value) {
+    projectName.value = "";
+    resetProjectTreeState();
     return;
   }
 
+  if (!isProjectMode.value || !activeProjectPath.value) {
+    clearProjectEditor();
+  }
+
   selectProjectRoot();
+  void loadProjectName();
   void loadTree();
 });
 
+watch(
+  () => route.params.projectId,
+  () => {
+    syncProjectIdFromRoute();
+
+    if (!isProjectRoute.value) {
+      selectedProjectId.value = "";
+      projectName.value = "";
+      resetProjectTreeState();
+      switchToGuest();
+      return;
+    }
+
+    if (!selectedProjectId.value) {
+      projectName.value = "";
+      resetProjectTreeState();
+      switchToGuest();
+    }
+  },
+);
+
 onMounted(() => {
   restoreGuest();
-  switchToGuest();
+  editorTheme.value = resolveDefaultEditorTheme();
+  syncProjectIdFromRoute();
 
   if (route.query.forgejo === "connected") {
     notice.value = t("editor.authConnectedNotice");

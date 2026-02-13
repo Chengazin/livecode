@@ -869,6 +869,13 @@ select:focus {
   gap: 8px;
 }
 
+.sidebar-head h2 {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .compact-form {
   margin-top: 0;
   grid-template-columns: 1fr;
@@ -876,6 +883,93 @@ select:focus {
 
 .compact-form .btn {
   width: 100%;
+}
+
+.projects-page {
+  gap: 14px;
+}
+
+.projects-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.projects-head-main {
+  min-width: 220px;
+}
+
+.projects-head-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.projects-create-inline {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) auto;
+  gap: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.projects-create-inline .btn {
+  white-space: nowrap;
+}
+
+.projects-list-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.projects-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.project-tile {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.project-tile h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.project-tile-main {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: flex-start;
+  gap: 4px;
+  min-height: 72px;
+}
+
+.git-accordion {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+  padding: 10px;
+}
+
+.git-accordion summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.git-accordion[open] summary {
+  margin-bottom: 8px;
 }
 
 .file-tree {
@@ -1350,6 +1444,16 @@ select:focus {
   background: #391d1a;
 }
 
+[data-theme="dark"] .project-tile {
+  border-color: #314661;
+  background: #132339;
+}
+
+[data-theme="dark"] .git-accordion {
+  border-color: #314661;
+  background: #132339;
+}
+
 @media (max-width: 1040px) {
   .explorer-page {
     grid-template-columns: 1fr;
@@ -1401,6 +1505,19 @@ select:focus {
 
   .editor-intro {
     flex-direction: column;
+  }
+
+  .projects-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .projects-create-inline {
+    grid-template-columns: 1fr;
+  }
+
+  .projects-create-inline .btn {
+    width: 100%;
   }
 
   .admin-subnav {

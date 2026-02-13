@@ -2,15 +2,31 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Project;
 use App\Models\ProjectParticipant;
+use App\Services\ProjectAccessService;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 
 class ProjectParticipantController extends Controller
 {
     public function index(Request $request)
     {
+        $user = $request->user();
+
+        if (! $user) {
+            return response()->json(['message' => 'Unauthorized.'], 401);
+        }
+
         $perPage = min((int) $request->query('per_page', 50), 200);
-        $query = ProjectParticipant::query();
+        $query = ProjectParticipant::query()
+            ->whereHas('project', function ($projectQuery) use ($user) {
+                $projectQuery
+                    ->where('owner_id', $user->user_id)
+                    ->orWhereHas('participants', function ($participantQuery) use ($user) {
+                        $participantQuery->where('user_id', $user->user_id);
+                    });
+            });
 
         if ($request->filled('project_id')) {
             $query->where('project_id', (int) $request->query('project_id'));
@@ -23,27 +39,66 @@ class ProjectParticipantController extends Controller
         return $query->paginate($perPage);
     }
 
-    public function show(int $participantId)
+    public function show(Request $request, int $participantId, ProjectAccessService $access)
     {
-        return ProjectParticipant::query()->findOrFail($participantId);
+        $user = $request->user();
+
+        if (! $user) {
+            return response()->json(['message' => 'Unauthorized.'], 401);
+        }
+
+        $participant = ProjectParticipant::query()->findOrFail($participantId);
+        $project = Project::query()->findOrFail($participant->project_id);
+
+        if (! $access->userHasAccess($project, $user)) {
+            return response()->json(['message' => 'Access denied.'], 403);
+        }
+
+        return $participant;
     }
 
     public function store(Request $request)
     {
+        $user = $request->user();
+
+        if (! $user) {
+            return response()->json(['message' => 'Unauthorized.'], 401);
+        }
+
         $data = $request->validate([
             'project_id' => ['required', 'integer', 'exists:projects,project_id'],
             'user_id' => ['required', 'integer', 'exists:users,user_id'],
             'joined_at' => ['nullable', 'date'],
         ]);
 
-        $participant = ProjectParticipant::query()->create($data);
+        $project = Project::query()->findOrFail((int) $data['project_id']);
+        if (! $this->isOwner($project, (int) $user->user_id)) {
+            return response()->json(['message' => 'Access denied.'], 403);
+        }
+
+        try {
+            $participant = ProjectParticipant::query()->create($data);
+        } catch (QueryException $e) {
+            return response()->json(['message' => 'Participant already exists.'], 409);
+        }
 
         return response()->json($participant, 201);
     }
 
     public function update(Request $request, int $participantId)
     {
+        $user = $request->user();
+
+        if (! $user) {
+            return response()->json(['message' => 'Unauthorized.'], 401);
+        }
+
         $participant = ProjectParticipant::query()->findOrFail($participantId);
+        $project = Project::query()->findOrFail($participant->project_id);
+
+        if (! $this->isOwner($project, (int) $user->user_id)) {
+            return response()->json(['message' => 'Access denied.'], 403);
+        }
 
         $data = $request->validate([
             'joined_at' => ['nullable', 'date'],
@@ -55,11 +110,30 @@ class ProjectParticipantController extends Controller
         return $participant;
     }
 
-    public function destroy(int $participantId)
+    public function destroy(Request $request, int $participantId)
     {
+        $user = $request->user();
+
+        if (! $user) {
+            return response()->json(['message' => 'Unauthorized.'], 401);
+        }
+
         $participant = ProjectParticipant::query()->findOrFail($participantId);
+        $project = Project::query()->findOrFail($participant->project_id);
+        $isOwner = $this->isOwner($project, (int) $user->user_id);
+        $isSelf = (int) $participant->user_id === (int) $user->user_id;
+
+        if (! $isOwner && ! $isSelf) {
+            return response()->json(['message' => 'Access denied.'], 403);
+        }
+
         $participant->delete();
 
         return response()->noContent();
+    }
+
+    private function isOwner(Project $project, int $userId): bool
+    {
+        return (int) $project->owner_id === $userId;
     }
 }

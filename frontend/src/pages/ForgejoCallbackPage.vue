@@ -7,7 +7,7 @@
       </p>
       <p v-if="errorMessage" class="error-banner">{{ errorMessage }}</p>
       <p v-else class="notice-banner">{{ statusMessage }}</p>
-      <RouterLink to="/editor" class="btn btn-secondary">{{ t("callback.back") }}</RouterLink>
+      <RouterLink :to="backTarget" class="btn btn-secondary">{{ t("callback.back") }}</RouterLink>
     </section>
   </div>
 </template>
@@ -22,15 +22,45 @@ import { saveSession } from "../services/auth";
 const route = useRoute();
 const router = useRouter();
 const { t } = useI18n();
+const FORGEJO_RETURN_KEY = "livecode.forgejo.return_path";
 
 const statusMessage = ref(t("callback.processing"));
 const errorMessage = ref("");
+const backTarget = ref("/projects");
 
 function getQueryValue(value) {
   return typeof value === "string" ? value : "";
 }
 
+function consumeReturnPath() {
+  try {
+    const stored = window.localStorage.getItem(FORGEJO_RETURN_KEY) || "";
+    window.localStorage.removeItem(FORGEJO_RETURN_KEY);
+
+    if (!stored || !stored.startsWith("/")) {
+      return "/projects";
+    }
+
+    return stored;
+  } catch (_error) {
+    return "/projects";
+  }
+}
+
+function withForgejoConnected(path) {
+  try {
+    const url = new URL(path, window.location.origin);
+    url.searchParams.set("forgejo", "connected");
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch (_error) {
+    return "/projects?forgejo=connected";
+  }
+}
+
 onMounted(async () => {
+  const returnPath = consumeReturnPath();
+  backTarget.value = returnPath;
+
   const code = getQueryValue(route.query.code);
   const state = getQueryValue(route.query.state);
 
@@ -43,7 +73,7 @@ onMounted(async () => {
     const response = await request({
       method: "GET",
       path: "/forgejo/oauth/callback",
-      auth: false,
+      auth: true,
       query: {
         code,
         state,
@@ -57,7 +87,7 @@ onMounted(async () => {
       saveSession(token, user);
       statusMessage.value = t("callback.oauthSucceeded");
       setTimeout(() => {
-        router.push("/editor");
+        router.push(returnPath);
       }, 600);
       return;
     }
@@ -65,7 +95,7 @@ onMounted(async () => {
     if (response.data?.status === "connected") {
       statusMessage.value = t("callback.connected");
       setTimeout(() => {
-        router.push("/editor?forgejo=connected");
+        router.push(withForgejoConnected(returnPath));
       }, 600);
       return;
     }

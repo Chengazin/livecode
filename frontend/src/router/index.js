@@ -5,6 +5,7 @@ import RegisterPage from "../pages/RegisterPage.vue";
 import ApiExplorerPage from "../pages/ApiExplorerPage.vue";
 import ForgejoCallbackPage from "../pages/ForgejoCallbackPage.vue";
 import CodeEditorPage from "../pages/CodeEditorPage.vue";
+import ProjectsPage from "../pages/ProjectsPage.vue";
 import ProfilePage from "../pages/ProfilePage.vue";
 import AdminPage from "../pages/AdminPage.vue";
 import AdminOverviewPage from "../pages/AdminOverviewPage.vue";
@@ -23,9 +24,22 @@ const routes = [
     component: CodeEditorPage,
   },
   {
+    path: "/projects",
+    name: "projects",
+    component: ProjectsPage,
+    meta: { requiresAuth: true },
+  },
+  {
+    path: "/projects/:projectId/editor",
+    name: "project-editor",
+    component: CodeEditorPage,
+    meta: { requiresAuth: true },
+  },
+  {
     path: "/profile",
     name: "profile",
     component: ProfilePage,
+    meta: { requiresAuth: true },
   },
   {
     path: "/login",
@@ -71,14 +85,15 @@ const router = createRouter({
 });
 
 router.beforeEach(async (to) => {
+  const requiresAuth = to.matched.some((record) => record.meta?.requiresAuth || record.meta?.requiresAdmin);
   const requiresAdmin = to.matched.some((record) => record.meta?.requiresAdmin);
-  if (!requiresAdmin) {
-    return true;
+  const session = getSession();
+  if (requiresAuth && !session.accessToken) {
+    return { path: "/login", query: { redirect: to.fullPath } };
   }
 
-  const session = getSession();
-  if (!session.accessToken) {
-    return { path: "/login", query: { redirect: to.fullPath } };
+  if (!requiresAdmin) {
+    return true;
   }
 
   let user = session.user;
@@ -98,7 +113,7 @@ router.beforeEach(async (to) => {
   }
 
   if (!user?.is_admin) {
-    return { path: "/editor" };
+    return { path: "/projects" };
   }
 
   return true;
