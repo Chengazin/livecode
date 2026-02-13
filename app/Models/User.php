@@ -29,6 +29,10 @@ class User extends Authenticatable
         'password_hash',
         'status',
         'language',
+        'theme',
+        'avatar_type',
+        'avatar_preset',
+        'avatar_path',
         'last_seen',
     ];
 
@@ -39,6 +43,8 @@ class User extends Authenticatable
      */
     protected $hidden = [
         'password_hash',
+        'forgejo_access_token',
+        'forgejo_refresh_token',
     ];
 
     /**
@@ -61,6 +67,10 @@ class User extends Authenticatable
             'created_at' => 'datetime',
             'updated_at' => 'datetime',
             'last_seen' => 'datetime',
+            'forgejo_access_token' => 'encrypted',
+            'forgejo_refresh_token' => 'encrypted',
+            'forgejo_token_expires_at' => 'datetime',
+            'forgejo_connected_at' => 'datetime',
         ];
     }
 

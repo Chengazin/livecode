@@ -11,9 +11,18 @@ class ProjectController extends Controller
 {
     public function index(Request $request)
     {
+        $user = $request->user();
+
+        if (! $user) {
+            return response()->json(['message' => 'Unauthorized.'], 401);
+        }
+
         $perPage = min((int) $request->query('per_page', 50), 200);
 
-        return Project::query()->paginate($perPage);
+        return Project::query()
+            ->where('owner_id', $user->user_id)
+            ->orderByDesc('created_at')
+            ->paginate($perPage);
     }
 
     public function show(int $projectId)

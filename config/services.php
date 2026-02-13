@@ -35,4 +35,12 @@ return [
         ],
     ],
 
+    'forgejo' => [
+        'base_url' => rtrim((string) env('FORGEJO_BASE_URL', ''), '/'),
+        'client_id' => env('FORGEJO_CLIENT_ID'),
+        'client_secret' => env('FORGEJO_CLIENT_SECRET'),
+        'redirect_url' => env('FORGEJO_REDIRECT_URL'),
+        'scopes' => env('FORGEJO_OAUTH_SCOPES', 'read:user,write:repo'),
+    ],
+
 ];

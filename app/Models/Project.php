@@ -26,6 +26,9 @@ class Project extends Model
         'is_public' => 'boolean',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
+        'git_enabled' => 'boolean',
+        'forgejo_connected_at' => 'datetime',
+        'forgejo_last_push_at' => 'datetime',
     ];
 
     public function owner(): BelongsTo

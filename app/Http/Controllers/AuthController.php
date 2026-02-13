@@ -12,8 +12,7 @@ class AuthController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'email', 'max:255', 'unique:users,email'],
             'password' => ['required', 'string', 'min:8', 'max:255'],
-            'status' => ['sometimes', 'string', 'max:20'],
-            'language' => ['sometimes', 'string', 'max:3'],
+            'language' => ['sometimes', 'string', 'in:rus,eng'],
             'device_name' => ['sometimes', 'string', 'max:255'],
         ]);
 
@@ -21,7 +20,7 @@ class AuthController extends Controller
             'name' => $data['name'],
             'email' => $data['email'],
             'password_hash' => Hash::make($data['password']),
-            'status' => $data['status'] ?? 'active',
+            'status' => 'active',
             'language' => $data['language'] ?? 'rus',
         ]);
 
@@ -31,7 +30,7 @@ class AuthController extends Controller
         return response()->json([
             'token_type' => 'Bearer',
             'access_token' => $plainTextToken,
-            'user' => $user,
+            'user' => $this->serializeUser($user),
         ], 201);
     }
 
@@ -59,7 +58,7 @@ class AuthController extends Controller
         return response()->json([
             'token_type' => 'Bearer',
             'access_token' => $plainTextToken,
-            'user' => $user,
+            'user' => $this->serializeUser($user),
         ]);
     }
 
@@ -83,5 +82,16 @@ class AuthController extends Controller
         }
 
         return response()->noContent();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function serializeUser(User $user): array
+    {
+        $payload = $user->toArray();
+        $payload['is_admin'] = $user->admin()->exists();
+
+        return $payload;
     }
 }

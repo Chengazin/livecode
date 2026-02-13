@@ -12,12 +12,16 @@ class AdminController extends Controller
     {
         $perPage = min((int) $request->query('per_page', 50), 200);
 
-        return Admin::query()->paginate($perPage);
+        return Admin::query()
+            ->with(['user:user_id,name,email,status'])
+            ->paginate($perPage);
     }
 
     public function show(int $adminId)
     {
-        return Admin::query()->findOrFail($adminId);
+        return Admin::query()
+            ->with(['user:user_id,name,email,status'])
+            ->findOrFail($adminId);
     }
 
     public function store(Request $request)
