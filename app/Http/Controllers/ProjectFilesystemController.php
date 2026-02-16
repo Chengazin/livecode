@@ -50,7 +50,7 @@ class ProjectFilesystemController extends Controller
             return $this->filesystemExceptionToResponse($e);
         }
 
-        event(new ProjectFilesystemEvent($project->project_id, $user->user_id, $event, $path));
+        $this->broadcastSafely(new ProjectFilesystemEvent($project->project_id, $user->user_id, $event, $path));
 
         return response()->json([
             'status' => 'ok',
@@ -154,7 +154,7 @@ class ProjectFilesystemController extends Controller
             return $this->filesystemExceptionToResponse($e);
         }
 
-        event(new ProjectFilesystemEvent($project->project_id, $user->user_id, 'file_saved', $file['path']));
+        $this->broadcastSafely(new ProjectFilesystemEvent($project->project_id, $user->user_id, 'file_saved', $file['path']));
 
         return response()->json([
             'status' => 'ok',
@@ -191,7 +191,7 @@ class ProjectFilesystemController extends Controller
             return $this->filesystemExceptionToResponse($e);
         }
 
-        event(new ProjectFilesystemEvent($project->project_id, $user->user_id, 'path_deleted', $deleted['path']));
+        $this->broadcastSafely(new ProjectFilesystemEvent($project->project_id, $user->user_id, 'path_deleted', $deleted['path']));
 
         return response()->json([
             'status' => 'ok',
@@ -229,7 +229,7 @@ class ProjectFilesystemController extends Controller
             return $this->filesystemExceptionToResponse($e);
         }
 
-        event(new ProjectFilesystemEvent($project->project_id, $user->user_id, 'path_moved', $moved['to_path']));
+        $this->broadcastSafely(new ProjectFilesystemEvent($project->project_id, $user->user_id, 'path_moved', $moved['to_path']));
 
         return response()->json([
             'status' => 'ok',
@@ -294,5 +294,14 @@ class ProjectFilesystemController extends Controller
             'archive_failed' => response()->json(['error' => 'archive_failed'], 500),
             default => throw $e,
         };
+    }
+
+    private function broadcastSafely(object $event): void
+    {
+        try {
+            event($event);
+        } catch (\Throwable) {
+            // Broadcast availability should not break API write paths.
+        }
     }
 }

@@ -15,11 +15,6 @@
         </div>
       </div>
 
-      <p class="muted-text">
-        {{ t("profile.currentSource") }}
-        <strong>{{ previewMode === "upload" ? t("profile.uploadedImage") : t("profile.presetIcon") }}</strong>
-      </p>
-
       <div ref="presetPickerRef" class="profile-preset-picker">
         <button class="profile-preset-toggle" type="button" :disabled="uploading" @click="togglePresetPicker">
           <span class="profile-preset-toggle-main">
@@ -59,23 +54,11 @@
         <button class="profile-upload-trigger" type="button" :disabled="uploading" @click="openAvatarPicker">
           {{ uploading ? t("common.loading") : t("profile.uploadImage") }}
         </button>
-        <span class="profile-upload-filename">{{ selectedAvatarFilename || t("profile.noFileSelected") }}</span>
       </div>
-
-      <button
-        v-if="profile.avatarType === 'upload' || profile.avatarUrl"
-        class="btn btn-ghost"
-        type="button"
-        :disabled="uploading"
-        @click="deleteAvatar"
-      >
-        {{ t("profile.removeUploadedImage") }}
-      </button>
     </section>
 
     <section class="card profile-form-card">
       <h1>{{ t("profile.title") }}</h1>
-      <p class="muted-text">{{ t("profile.subtitle") }}</p>
 
       <form class="form-grid" @submit.prevent="saveProfile">
         <label class="field field-row">
@@ -360,27 +343,6 @@ async function uploadAvatar(event) {
     if (event?.target) {
       event.target.value = "";
     }
-  }
-}
-
-async function deleteAvatar() {
-  uploading.value = true;
-  error.value = "";
-  notice.value = "";
-
-  try {
-    const response = await request({
-      method: "DELETE",
-      path: "/me/avatar",
-      auth: true,
-    });
-
-    applyProfile(response.data);
-    notice.value = t("profile.avatarRemoved");
-  } catch (removeError) {
-    error.value = resolveErrorMessage(removeError);
-  } finally {
-    uploading.value = false;
   }
 }
 

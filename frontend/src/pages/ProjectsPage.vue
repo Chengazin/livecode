@@ -46,25 +46,47 @@
       </div>
 
       <p v-if="loading" class="muted-text">{{ t("projects.loadingProjects") }}</p>
-      <p v-else-if="projects.length === 0" class="muted-text">{{ t("projects.emptyProjects") }}</p>
+      <template v-else>
+        <p v-if="ownedProjects.length === 0" class="muted-text">{{ t("projects.emptyProjects") }}</p>
 
-      <div v-else class="projects-grid">
-        <article v-for="project in projects" :key="project.project_id" class="project-tile">
-          <div class="project-tile-main">
-            <h3>{{ project.name }}</h3>
-            <p v-if="project.description" class="muted-text">{{ project.description }}</p>
+        <div v-else class="projects-grid">
+          <article v-for="project in ownedProjects" :key="project.project_id" class="project-tile">
+            <div class="project-tile-main">
+              <h3>{{ project.name }}</h3>
+              <p v-if="project.description" class="muted-text">{{ project.description }}</p>
+            </div>
+            <button class="btn btn-secondary" type="button" @click="openProject(project.project_id)">
+              {{ t("projects.openProject") }}
+            </button>
+          </article>
+        </div>
+
+        <div class="projects-subsection">
+          <div class="sidebar-head">
+            <h3>{{ t("projects.collaboratorProjects") }}</h3>
           </div>
-          <button class="btn btn-secondary" type="button" @click="openProject(project.project_id)">
-            {{ t("projects.openProject") }}
-          </button>
-        </article>
-      </div>
+
+          <p v-if="collaboratorProjects.length === 0" class="muted-text">{{ t("projects.emptyCollaboratorProjects") }}</p>
+
+          <div v-else class="projects-grid">
+            <article v-for="project in collaboratorProjects" :key="project.project_id" class="project-tile">
+              <div class="project-tile-main">
+                <h3>{{ project.name }}</h3>
+                <p v-if="project.description" class="muted-text">{{ project.description }}</p>
+              </div>
+              <button class="btn btn-secondary" type="button" @click="openProject(project.project_id)">
+                {{ t("projects.openProject") }}
+              </button>
+            </article>
+          </div>
+        </div>
+      </template>
     </section>
   </div>
 </template>
 
 <script setup>
-import { nextTick, onMounted, reactive, ref } from "vue";
+import { computed, nextTick, onMounted, reactive, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { request } from "../services/api";
@@ -73,6 +95,7 @@ import { getSession } from "../services/auth";
 const route = useRoute();
 const router = useRouter();
 const { t } = useI18n();
+const session = ref(getSession());
 
 const loading = ref(false);
 const creating = ref(false);
@@ -85,6 +108,21 @@ const nameInput = ref(null);
 const form = reactive({
   name: "",
   description: "",
+});
+const currentUserId = computed(() => Number(session.value?.user?.user_id || 0));
+const ownedProjects = computed(() => {
+  if (!currentUserId.value) {
+    return projects.value;
+  }
+
+  return projects.value.filter((project) => Number(project?.owner_id || 0) === currentUserId.value);
+});
+const collaboratorProjects = computed(() => {
+  if (!currentUserId.value) {
+    return [];
+  }
+
+  return projects.value.filter((project) => Number(project?.owner_id || 0) !== currentUserId.value);
 });
 
 function readError(errorInput) {
@@ -177,7 +215,7 @@ async function openProject(projectId) {
 }
 
 onMounted(() => {
-  if (!getSession().accessToken) {
+  if (!session.value.accessToken) {
     void router.replace({ path: "/login", query: { redirect: route.fullPath } });
     return;
   }

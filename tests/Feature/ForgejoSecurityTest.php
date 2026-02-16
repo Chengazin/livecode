@@ -4,11 +4,13 @@ namespace Tests\Feature;
 
 use App\Models\Project;
 use App\Models\User;
+use App\Services\ProjectGitService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
+use Mockery\MockInterface;
 use Tests\TestCase;
 
 class ForgejoSecurityTest extends TestCase
@@ -59,6 +61,7 @@ class ForgejoSecurityTest extends TestCase
     {
         config([
             'services.forgejo.base_url' => 'https://forgejo.example.test',
+            'services.forgejo.git_base_url' => 'https://forgejo.example.test',
             'services.forgejo.client_id' => 'client-id',
             'services.forgejo.client_secret' => 'client-secret',
             'services.forgejo.redirect_url' => 'https://app.example.test/forgejo/callback',
@@ -76,6 +79,30 @@ class ForgejoSecurityTest extends TestCase
         $this->assertIsString($response->json('state'));
         $this->assertStringContainsString(
             '/login/oauth/authorize',
+            (string) $response->json('auth_url')
+        );
+    }
+
+    public function test_start_connect_uses_public_forgejo_url_for_auth_redirect(): void
+    {
+        config([
+            'services.forgejo.base_url' => 'http://forgejo.internal:3000',
+            'services.forgejo.public_url' => 'http://localhost:3000',
+            'services.forgejo.client_id' => 'client-id',
+            'services.forgejo.client_secret' => 'client-secret',
+            'services.forgejo.redirect_url' => 'https://app.example.test/forgejo/callback',
+        ]);
+
+        $user = $this->createUser('connect-public-url@example.com');
+        $token = $user->createToken('test')->plainTextToken;
+
+        $response = $this->withToken($token)->postJson('/api/forgejo/oauth/start', [
+            'mode' => 'connect',
+        ]);
+
+        $response->assertOk();
+        $this->assertStringStartsWith(
+            'http://localhost:3000/login/oauth/authorize',
             (string) $response->json('auth_url')
         );
     }
@@ -126,6 +153,378 @@ class ForgejoSecurityTest extends TestCase
             ]);
 
         $this->assertNull($existing->fresh()->forgejo_user_id);
+    }
+
+    public function test_connect_existing_repo_accepts_https_repository_url(): void
+    {
+        config([
+            'services.forgejo.base_url' => 'https://forgejo.example.test',
+            'services.forgejo.git_base_url' => 'https://forgejo.example.test',
+            'services.forgejo.client_id' => 'client-id',
+            'services.forgejo.client_secret' => 'client-secret',
+            'services.forgejo.redirect_url' => 'https://app.example.test/forgejo/callback',
+        ]);
+
+        $owner = $this->createUser('forgejo-owner@example.com');
+        $owner->forgejo_access_token = 'forgejo-token';
+        $owner->forgejo_connected_at = now();
+        $owner->save();
+
+        $project = Project::query()->create([
+            'name' => 'Demo',
+            'description' => 'demo',
+            'owner_id' => $owner->user_id,
+            'project_path' => 'projects/demo',
+            'is_public' => false,
+        ]);
+
+        Http::fake([
+            'https://forgejo.example.test/api/v1/repos/team/repo' => Http::response([
+                'id' => 42,
+                'full_name' => 'team/repo',
+                'clone_url' => 'https://forgejo.example.test/team/repo.git',
+                'html_url' => 'https://forgejo.example.test/team/repo',
+                'default_branch' => 'main',
+                'permissions' => ['push' => true],
+            ], 200),
+        ]);
+
+        $this->mock(ProjectGitService::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('initRepository')->once();
+            $mock->shouldReceive('setRemote')->once();
+        });
+
+        $token = $owner->createToken('test')->plainTextToken;
+
+        $response = $this->withToken($token)->postJson('/api/projects/'.$project->project_id.'/forgejo/connect', [
+            'mode' => 'existing',
+            'repo_url' => 'https://forgejo.example.test/team/repo.git',
+        ]);
+
+        $response
+            ->assertOk()
+            ->assertJsonPath('forgejo_repo_full_name', 'team/repo')
+            ->assertJsonPath('forgejo_repo_clone_url', 'https://forgejo.example.test/team/repo.git');
+    }
+
+    public function test_connect_existing_repo_uses_configured_git_base_url_for_clone_remote(): void
+    {
+        config([
+            'services.forgejo.base_url' => 'https://forgejo.example.test',
+            'services.forgejo.git_base_url' => 'http://forgejo.internal:3000',
+            'services.forgejo.client_id' => 'client-id',
+            'services.forgejo.client_secret' => 'client-secret',
+            'services.forgejo.redirect_url' => 'https://app.example.test/forgejo/callback',
+        ]);
+
+        $owner = $this->createUser('forgejo-git-base@example.com');
+        $owner->forgejo_access_token = 'forgejo-token';
+        $owner->forgejo_connected_at = now();
+        $owner->save();
+
+        $project = Project::query()->create([
+            'name' => 'Demo git base',
+            'description' => 'demo',
+            'owner_id' => $owner->user_id,
+            'project_path' => 'projects/demo-git-base',
+            'is_public' => false,
+        ]);
+
+        Http::fake([
+            'https://forgejo.example.test/api/v1/repos/team/repo' => Http::response([
+                'id' => 88,
+                'full_name' => 'team/repo',
+                'clone_url' => 'https://forgejo.example.test/team/repo.git',
+                'html_url' => 'https://forgejo.example.test/team/repo',
+                'default_branch' => 'main',
+                'permissions' => ['push' => true],
+            ], 200),
+        ]);
+
+        $this->mock(ProjectGitService::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('initRepository')->once();
+            $mock->shouldReceive('setRemote')->once();
+        });
+
+        $token = $owner->createToken('test')->plainTextToken;
+
+        $response = $this->withToken($token)->postJson('/api/projects/'.$project->project_id.'/forgejo/connect', [
+            'mode' => 'existing',
+            'repo_url' => 'https://forgejo.example.test/team/repo.git',
+        ]);
+
+        $response
+            ->assertOk()
+            ->assertJsonPath('forgejo_repo_full_name', 'team/repo')
+            ->assertJsonPath('forgejo_repo_clone_url', 'http://forgejo.internal:3000/team/repo.git');
+    }
+
+    public function test_connect_existing_repo_accepts_ssh_repository_url(): void
+    {
+        config([
+            'services.forgejo.base_url' => 'https://forgejo.example.test',
+            'services.forgejo.git_base_url' => 'https://forgejo.example.test',
+            'services.forgejo.client_id' => 'client-id',
+            'services.forgejo.client_secret' => 'client-secret',
+            'services.forgejo.redirect_url' => 'https://app.example.test/forgejo/callback',
+        ]);
+
+        $owner = $this->createUser('forgejo-ssh-owner@example.com');
+        $owner->forgejo_access_token = 'forgejo-token';
+        $owner->forgejo_connected_at = now();
+        $owner->save();
+
+        $project = Project::query()->create([
+            'name' => 'Demo SSH',
+            'description' => 'demo',
+            'owner_id' => $owner->user_id,
+            'project_path' => 'projects/demo-ssh',
+            'is_public' => false,
+        ]);
+
+        Http::fake([
+            'https://forgejo.example.test/api/v1/repos/team/repo' => Http::response([
+                'id' => 77,
+                'full_name' => 'team/repo',
+                'clone_url' => 'https://forgejo.example.test/team/repo.git',
+                'html_url' => 'https://forgejo.example.test/team/repo',
+                'default_branch' => 'main',
+                'permissions' => ['push' => true],
+            ], 200),
+        ]);
+
+        $this->mock(ProjectGitService::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('initRepository')->once();
+            $mock->shouldReceive('setRemote')->once();
+        });
+
+        $token = $owner->createToken('test')->plainTextToken;
+
+        $response = $this->withToken($token)->postJson('/api/projects/'.$project->project_id.'/forgejo/connect', [
+            'mode' => 'existing',
+            'repo_url' => 'git@forgejo.example.test:team/repo.git',
+        ]);
+
+        $response
+            ->assertOk()
+            ->assertJsonPath('forgejo_repo_full_name', 'team/repo')
+            ->assertJsonPath('forgejo_repo_clone_url', 'https://forgejo.example.test/team/repo.git');
+    }
+
+    public function test_connect_existing_repo_rejects_foreign_repository_host(): void
+    {
+        config([
+            'services.forgejo.base_url' => 'https://forgejo.example.test',
+            'services.forgejo.client_id' => 'client-id',
+            'services.forgejo.client_secret' => 'client-secret',
+            'services.forgejo.redirect_url' => 'https://app.example.test/forgejo/callback',
+        ]);
+
+        $owner = $this->createUser('forgejo-foreign-owner@example.com');
+        $owner->forgejo_access_token = 'forgejo-token';
+        $owner->forgejo_connected_at = now();
+        $owner->save();
+
+        $project = Project::query()->create([
+            'name' => 'Demo Foreign',
+            'description' => 'demo',
+            'owner_id' => $owner->user_id,
+            'project_path' => 'projects/demo-foreign',
+            'is_public' => false,
+        ]);
+
+        Http::fake();
+
+        $this->mock(ProjectGitService::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('initRepository')->never();
+            $mock->shouldReceive('setRemote')->never();
+        });
+
+        $token = $owner->createToken('test')->plainTextToken;
+
+        $response = $this->withToken($token)->postJson('/api/projects/'.$project->project_id.'/forgejo/connect', [
+            'mode' => 'existing',
+            'repo_url' => 'https://github.com/team/repo.git',
+        ]);
+
+        $response
+            ->assertStatus(502)
+            ->assertJson([
+                'message' => 'Repository URL host does not match configured Forgejo host.',
+            ]);
+
+        Http::assertNothingSent();
+    }
+
+    public function test_save_pushes_pending_commits_even_when_worktree_has_no_changes(): void
+    {
+        config([
+            'services.forgejo.base_url' => 'http://forgejo:3000',
+            'services.forgejo.public_url' => 'http://localhost:3000',
+            'services.forgejo.git_base_url' => 'http://forgejo:3000',
+            'services.forgejo.client_id' => 'client-id',
+            'services.forgejo.client_secret' => 'client-secret',
+            'services.forgejo.redirect_url' => 'https://app.example.test/forgejo/callback',
+        ]);
+
+        $owner = $this->createUser('save-push-owner@example.com');
+        $owner->forgejo_access_token = 'forgejo-token';
+        $owner->forgejo_connected_at = now();
+        $owner->save();
+
+        $project = Project::query()->create([
+            'name' => 'Save Push',
+            'description' => 'demo',
+            'owner_id' => $owner->user_id,
+            'project_path' => 'projects/save-push',
+            'is_public' => false,
+        ]);
+        $project->git_enabled = true;
+        $project->forgejo_repo_full_name = 'gigabyte/my-repo1';
+        $project->forgejo_repo_clone_url = 'http://forgejo:3000/gigabyte/my-repo1.git';
+        $project->forgejo_default_branch = 'main';
+        $project->forgejo_connected_at = now();
+        $project->save();
+
+        $this->mock(ProjectGitService::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('initRepository')->once();
+            $mock->shouldReceive('commitAll')->once()->andReturn(false);
+            $mock->shouldReceive('push')->once()->andReturn("To http://forgejo:3000/gigabyte/my-repo1.git\n   abc..def  main -> main");
+        });
+
+        $token = $owner->createToken('test')->plainTextToken;
+
+        $response = $this->withToken($token)->postJson('/api/projects/'.$project->project_id.'/forgejo/save', [
+            'message' => 'retry push',
+        ]);
+
+        $response->assertOk()->assertJsonPath('status', 'pushed');
+        $this->assertNotNull($project->fresh()->forgejo_last_push_at);
+    }
+
+    public function test_save_returns_nothing_to_commit_when_no_changes_and_no_commits_exist(): void
+    {
+        config([
+            'services.forgejo.base_url' => 'http://forgejo:3000',
+            'services.forgejo.public_url' => 'http://localhost:3000',
+            'services.forgejo.git_base_url' => 'http://forgejo:3000',
+            'services.forgejo.client_id' => 'client-id',
+            'services.forgejo.client_secret' => 'client-secret',
+            'services.forgejo.redirect_url' => 'https://app.example.test/forgejo/callback',
+        ]);
+
+        $owner = $this->createUser('save-empty-owner@example.com');
+        $owner->forgejo_access_token = 'forgejo-token';
+        $owner->forgejo_connected_at = now();
+        $owner->save();
+
+        $project = Project::query()->create([
+            'name' => 'Save Empty',
+            'description' => 'demo',
+            'owner_id' => $owner->user_id,
+            'project_path' => 'projects/save-empty',
+            'is_public' => false,
+        ]);
+        $project->git_enabled = true;
+        $project->forgejo_repo_full_name = 'gigabyte/my-repo1';
+        $project->forgejo_repo_clone_url = 'http://forgejo:3000/gigabyte/my-repo1.git';
+        $project->forgejo_default_branch = 'main';
+        $project->forgejo_connected_at = now();
+        $project->save();
+
+        $this->mock(ProjectGitService::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('initRepository')->once();
+            $mock->shouldReceive('commitAll')->once()->andReturn(false);
+            $mock->shouldReceive('push')->once()->andThrow(
+                new \RuntimeException("error: src refspec main does not match any\nerror: failed to push some refs")
+            );
+        });
+
+        $token = $owner->createToken('test')->plainTextToken;
+
+        $response = $this->withToken($token)->postJson('/api/projects/'.$project->project_id.'/forgejo/save', [
+            'message' => 'retry push',
+        ]);
+
+        $response->assertOk()->assertJsonPath('status', 'nothing_to_commit');
+        $this->assertNull($project->fresh()->forgejo_last_push_at);
+    }
+
+    public function test_save_retries_push_with_alternative_forgejo_url_when_primary_is_unreachable(): void
+    {
+        config([
+            'services.forgejo.base_url' => 'http://forgejo:3000',
+            'services.forgejo.public_url' => 'http://localhost:3000',
+            'services.forgejo.git_base_url' => 'http://localhost:3000',
+            'services.forgejo.client_id' => 'client-id',
+            'services.forgejo.client_secret' => 'client-secret',
+            'services.forgejo.redirect_url' => 'https://app.example.test/forgejo/callback',
+        ]);
+
+        $owner = $this->createUser('save-retry-owner@example.com');
+        $owner->forgejo_access_token = 'forgejo-token';
+        $owner->forgejo_connected_at = now();
+        $owner->save();
+
+        $project = Project::query()->create([
+            'name' => 'Save Retry',
+            'description' => 'demo',
+            'owner_id' => $owner->user_id,
+            'project_path' => 'projects/save-retry',
+            'is_public' => false,
+        ]);
+        $project->git_enabled = true;
+        $project->forgejo_repo_full_name = 'gigabyte/my-repo1';
+        $project->forgejo_repo_clone_url = 'http://localhost:3000/gigabyte/my-repo1.git';
+        $project->forgejo_default_branch = 'main';
+        $project->forgejo_connected_at = now();
+        $project->save();
+
+        $this->mock(ProjectGitService::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('initRepository')->once();
+            $mock->shouldReceive('commitAll')->once()->andReturn(false);
+            $mock->shouldReceive('push')
+                ->once()
+                ->ordered()
+                ->withArgs(function (
+                    string $path,
+                    string $remoteUrl,
+                    string $branch,
+                    string $token,
+                    array $author
+                ): bool {
+                    return $remoteUrl === 'http://localhost:3000/gigabyte/my-repo1.git';
+                })
+                ->andThrow(new \RuntimeException(
+                    "fatal: unable to access 'http://localhost:3000/gigabyte/my-repo1.git/': Failed to connect to localhost port 3000 after 0 ms: Couldn't connect to server"
+                ));
+
+            $mock->shouldReceive('push')
+                ->once()
+                ->ordered()
+                ->withArgs(function (
+                    string $path,
+                    string $remoteUrl,
+                    string $branch,
+                    string $token,
+                    array $author
+                ): bool {
+                    return $remoteUrl === 'http://forgejo:3000/gigabyte/my-repo1.git';
+                })
+                ->andReturn("To http://forgejo:3000/gigabyte/my-repo1.git\n   abc..def  main -> main");
+        });
+
+        $token = $owner->createToken('test')->plainTextToken;
+
+        $response = $this->withToken($token)->postJson('/api/projects/'.$project->project_id.'/forgejo/save', [
+            'message' => 'retry push',
+        ]);
+
+        $response->assertOk()->assertJsonPath('status', 'pushed');
+        $this->assertSame(
+            'http://forgejo:3000/gigabyte/my-repo1.git',
+            (string) $project->fresh()->forgejo_repo_clone_url
+        );
     }
 
     public function test_non_owner_cannot_update_foreign_project(): void

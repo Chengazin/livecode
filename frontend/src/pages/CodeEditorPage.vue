@@ -1,44 +1,32 @@
 <template>
   <div class="page editor-page">
-    <section class="card editor-intro">
-      <div>
-        <h1>{{ t("editor.title") }}</h1>
-        <p class="muted-text">
-          {{ t("editor.subtitle") }}
-        </p>
-      </div>
-      <p class="mode-chip">{{ isAuthenticated ? t("editor.modeAuthorized") : t("editor.modeGuest") }}</p>
-    </section>
 
-    <div class="editor-layout">
-      <aside class="card editor-sidebar">
+    <div
+      ref="editorLayoutHost"
+      class="editor-layout"
+      :class="{
+        'editor-layout--main-only': !showSidebar,
+        'editor-layout--with-sidebar': showSidebar,
+        'editor-layout--with-chat': canUseProjectFs,
+      }"
+      :style="editorLayoutStyle"
+    >
+      <aside v-if="showSidebar" ref="editorSidebarPane" class="card editor-sidebar">
         <section class="sidebar-block">
           <div class="sidebar-head">
             <h2>{{ workspaceTitle }}</h2>
-            <button
-              v-if="isProjectRoute"
-              class="btn btn-sm btn-ghost"
-              type="button"
-              @click="goToProjects"
-            >
+            <button class="btn btn-sm btn-ghost" type="button" @click="goToProjects">
               {{ t("editor.backToProjects") }}
             </button>
-            <button v-else class="btn btn-sm btn-secondary" type="button" @click="switchToGuest">{{ t("editor.guestFile") }}</button>
           </div>
           <p class="muted-text">{{ t("editor.currentFile") }} <code>{{ currentPath }}</code></p>
-          <p v-if="!isAuthenticated" class="muted-text">
-            <RouterLink to="/register">{{ t("editor.registerPrompt") }}</RouterLink>
-            {{ t("common.or") }}
-            <RouterLink to="/login">{{ t("editor.loginPrompt") }}</RouterLink>
-            {{ t("editor.authPromptSuffix") }}
-          </p>
         </section>
 
         <section v-if="canUseProjectFs" class="sidebar-block">
           <div class="sidebar-head">
             <h2>{{ t("editor.files") }}</h2>
-            <button class="btn btn-sm btn-ghost" type="button" :disabled="treeLoading" @click="loadTree">
-              {{ treeLoading ? t("editor.syncing") : t("editor.sync") }}
+            <button class="btn btn-sm btn-ghost" type="button" :disabled="syncBusy" @click="syncProjectWorkspace">
+              {{ syncBusy ? t("editor.syncing") : t("editor.sync") }}
             </button>
           </div>
           <div class="tree-utility-actions">
@@ -183,6 +171,114 @@
           </div>
         </section>
 
+        <section v-if="canManageProjectSettings" class="sidebar-block">
+          <details class="git-accordion project-settings-accordion">
+            <summary>{{ t("editor.projectSettings") }}</summary>
+
+            <form class="form-grid compact-form" @submit.prevent="saveProjectSettings">
+              <label class="field field-row">
+                <span>{{ t("editor.projectName") }}</span>
+                <input v-model.trim="projectSettings.name" type="text" maxlength="255" required />
+              </label>
+
+              <label class="field field-row">
+                <span>{{ t("editor.projectVisibility") }}</span>
+                <select v-model="projectSettings.visibility">
+                  <option value="private">{{ t("editor.visibilityPrivate") }}</option>
+                  <option value="public">{{ t("editor.visibilityPublic") }}</option>
+                </select>
+              </label>
+
+              <button class="btn" type="submit" :disabled="projectSettingsBusy">
+                {{ projectSettingsBusy ? t("common.saving") : t("editor.saveProjectSettings") }}
+              </button>
+            </form>
+
+            <div class="project-settings-block">
+              <div class="sidebar-head">
+                <h2>{{ t("editor.collaborators") }}</h2>
+              </div>
+
+              <form class="form-grid compact-form" @submit.prevent="addCollaboratorById">
+                <label class="field field-row">
+                  <span>{{ t("editor.collaboratorUserId") }}</span>
+                  <input
+                    v-model.trim="collaboratorUserId"
+                    type="number"
+                    min="1"
+                    step="1"
+                    inputmode="numeric"
+                    :placeholder="t('editor.collaboratorUserIdPlaceholder')"
+                  />
+                </label>
+                <button class="btn btn-secondary" type="submit" :disabled="collaboratorBusy || !collaboratorUserId">
+                  {{ collaboratorBusy ? t("common.saving") : t("editor.addCollaborator") }}
+                </button>
+              </form>
+
+              <div class="project-invite-actions">
+                <button class="btn btn-sm btn-secondary" type="button" :disabled="inviteBusy" @click="createInviteLink">
+                  {{ inviteBusy ? t("editor.generatingInvite") : t("editor.generateInviteLink") }}
+                </button>
+                <button class="btn btn-sm btn-ghost" type="button" :disabled="!inviteLink" @click="copyInviteLink">
+                  {{ t("editor.copyInviteLink") }}
+                </button>
+              </div>
+              <p v-if="inviteLink" class="muted-text project-invite-link"><code>{{ inviteLink }}</code></p>
+
+              <p v-if="participantsLoading" class="muted-text">{{ t("editor.loadingCollaborators") }}</p>
+              <p v-else-if="projectParticipants.length === 0" class="muted-text">{{ t("editor.noCollaborators") }}</p>
+
+              <div v-else class="collaborator-list">
+                <div v-for="participant in projectParticipants" :key="participant.participant_id" class="collaborator-row">
+                  <div class="collaborator-copy">
+                    <strong>#{{ participant.user_id }}</strong>
+                    <small v-if="participant.user?.name || participant.user?.email">
+                      {{ participant.user?.name || participant.user?.email }}
+                    </small>
+                  </div>
+                  <button
+                    class="btn btn-sm btn-ghost"
+                    type="button"
+                    :disabled="collaboratorBusy"
+                    @click="removeCollaborator(participant)"
+                  >
+                    {{ t("editor.removeCollaborator") }}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </details>
+        </section>
+
+        <section v-if="canUseProjectFs" class="sidebar-block">
+          <details class="git-accordion realtime-accordion" open>
+            <summary>{{ t("editor.liveSession") }}</summary>
+
+            <div class="realtime-head">
+              <p class="muted-text">{{ t("editor.liveSyncHint") }}</p>
+              <label class="realtime-toggle">
+                <input v-model="liveSyncEnabled" type="checkbox" />
+                <span>{{ t("editor.liveSyncEnabled") }}</span>
+              </label>
+            </div>
+
+            <div class="realtime-presence">
+              <h3>{{ t("editor.onlineCollaborators") }}</h3>
+              <p v-if="realtimePeers.length === 0" class="muted-text">{{ t("editor.onlyYouOnline") }}</p>
+              <div v-else class="presence-list">
+                <div v-for="peer in realtimePeers" :key="peer.user_id" class="presence-row">
+                  <strong>{{ peer.name }}</strong>
+                  <small v-if="peer.path">
+                    {{ peer.path }}<span v-if="peer.cursor_row !== null"> @ {{ peer.cursor_row + 1 }}:{{ (peer.cursor_column ?? 0) + 1 }}</span>
+                  </small>
+                  <small v-else>{{ t("editor.presenceNoFile") }}</small>
+                </div>
+              </div>
+            </div>
+          </details>
+        </section>
+
         <section v-if="isAuthenticated && isProjectRoute" class="sidebar-block">
           <details class="git-accordion">
             <summary>{{ t("editor.gitWork") }}</summary>
@@ -210,13 +306,13 @@
               </label>
 
               <label v-if="forgejoMode === 'existing'" class="field">
-                <span>{{ t("editor.owner") }}</span>
-                <input v-model.trim="forgejoOwner" type="text" maxlength="255" placeholder="team-or-user" />
-              </label>
-
-              <label v-if="forgejoMode === 'existing'" class="field">
-                <span>{{ t("editor.repo") }}</span>
-                <input v-model.trim="forgejoRepo" type="text" maxlength="255" placeholder="repo-name" />
+                <span>{{ t("editor.repositoryUrl") }}</span>
+                <input
+                  v-model.trim="forgejoRepoUrl"
+                  type="text"
+                  maxlength="2048"
+                  :placeholder="t('editor.repositoryUrlPlaceholder')"
+                />
               </label>
 
               <button class="btn" type="submit" :disabled="forgejoBusy || !selectedProjectId">{{ t("editor.connectProjectRepo") }}</button>
@@ -233,15 +329,17 @@
         </section>
       </aside>
 
+      <button
+        v-if="canResizeSidebarPane"
+        class="editor-splitter editor-splitter--sidebar"
+        :class="{ 'is-active': activeResizePane === 'sidebar' }"
+        type="button"
+        aria-label="Resize sidebar"
+        @pointerdown="startPaneResize('sidebar', $event)"
+      />
+
       <section class="card editor-main">
         <div class="editor-toolbar">
-          <div class="editor-toolbar-main">
-            <strong>{{ currentPath }}</strong>
-            <span class="muted-text">
-              {{ toolbarContextLabel }}
-            </span>
-          </div>
-
           <div class="editor-toolbar-actions">
             <label class="field-inline">
               <span>{{ t("common.language") }}</span>
@@ -266,8 +364,46 @@
 
         <p v-if="notice" class="notice-banner">{{ notice }}</p>
         <p v-if="error" class="error-banner">{{ error }}</p>
+        <div class="editor-stage">
+          <div ref="editorHost" class="ace-editor-host" />
+        </div>
+      </section>
 
-        <div ref="editorHost" class="ace-editor-host" />
+      <button
+        v-if="canResizeChatPane"
+        class="editor-splitter editor-splitter--chat"
+        :class="{ 'is-active': activeResizePane === 'chat' }"
+        type="button"
+        aria-label="Resize chat panel"
+        @pointerdown="startPaneResize('chat', $event)"
+      />
+
+      <section v-if="canUseProjectFs" ref="editorChatPane" class="card editor-chat-column">
+        <div class="editor-chat-head">
+          <h3>{{ t("editor.sessionChat") }}</h3>
+        </div>
+        <div class="chat-log">
+          <p v-if="chatMessages.length === 0" class="muted-text">{{ t("editor.chatEmpty") }}</p>
+          <div v-for="message in chatMessages" :key="message.id" class="chat-row" :class="{ self: message.user_id === currentUserId }">
+            <div class="chat-copy">
+              <strong>{{ message.user_name }}</strong>
+              <small>{{ message.created_at_label }}</small>
+            </div>
+            <p>{{ message.message }}</p>
+          </div>
+        </div>
+
+        <form class="chat-form" @submit.prevent="sendChatMessage">
+          <input
+            v-model.trim="chatDraft"
+            type="text"
+            maxlength="1000"
+            :placeholder="t('editor.chatPlaceholder')"
+          />
+          <button class="btn btn-sm btn-secondary" type="submit" :disabled="chatSending || !chatDraft">
+            {{ chatSending ? t("common.saving") : t("editor.chatSend") }}
+          </button>
+        </form>
       </section>
     </div>
   </div>
@@ -293,17 +429,38 @@ import "ace-builds/src-noconflict/mode-markdown";
 import "ace-builds/src-noconflict/mode-text";
 import { buildApiUrl, request } from "../services/api";
 import { getSession } from "../services/auth";
+import {
+  applyTextOperation,
+  createRealtimeOperationId,
+  getOrCreateRealtimeClientId,
+  isNoopTextOperation,
+  normalizeTextOperation,
+  transformConcurrentTextOperations,
+} from "../services/collabOt";
+import {
+  disconnectRealtimeClient,
+  joinProjectRealtimeChannel,
+  leaveProjectRealtimeChannel,
+} from "../services/realtime";
 
 const route = useRoute();
 const router = useRouter();
-const { t } = useI18n();
+const { t, locale } = useI18n();
 
 const GUEST_KEY = "livecode.editor.guest";
 const FORGEJO_RETURN_KEY = "livecode.forgejo.return_path";
+const LAYOUT_KEY = "livecode.editor.layout";
+const SIDEBAR_MIN_WIDTH = 220;
+const SIDEBAR_MAX_WIDTH = 640;
+const CHAT_MIN_WIDTH = 260;
+const CHAT_MAX_WIDTH = 760;
+const MAIN_MIN_WIDTH = 460;
+const SPLITTER_WIDTH = 18;
 
 const session = ref(getSession());
 const isAuthenticated = computed(() => Boolean(session.value.accessToken));
 const isProjectRoute = computed(() => Boolean(route.params.projectId));
+const showSidebar = computed(() => isAuthenticated.value && isProjectRoute.value);
 
 const languageOptions = [
   { value: "javascript", label: "JavaScript" },
@@ -324,11 +481,20 @@ const themeOptions = [
 ];
 
 const editorHost = ref(null);
+const editorLayoutHost = ref(null);
+const editorSidebarPane = ref(null);
+const editorChatPane = ref(null);
 let editor = null;
 let syncingEditor = false;
 
 const editorLanguage = ref("javascript");
 const editorTheme = ref("github");
+const viewportWidth = ref(typeof window !== "undefined" ? window.innerWidth : 1600);
+const sidebarWidth = ref(360);
+const chatWidth = ref(340);
+const sidebarResized = ref(false);
+const chatResized = ref(false);
+const activeResizePane = ref("");
 
 const guest = reactive({
   path: "scratch/main.js",
@@ -343,6 +509,7 @@ const dirty = ref(false);
 
 const selectedProjectId = ref("");
 const projectName = ref("");
+const projectMeta = ref(null);
 const tree = ref([]);
 const treeLoading = ref(false);
 const expanded = ref([]);
@@ -362,17 +529,106 @@ const newNodeInput = ref(null);
 const nodeBusy = ref(false);
 const saving = ref(false);
 const forgejoBusy = ref(false);
+const repoSyncBusy = ref(false);
 
 const forgejoMode = ref("create");
 const forgejoRepoName = ref("");
-const forgejoOwner = ref("");
-const forgejoRepo = ref("");
+const forgejoRepoUrl = ref("");
 const forgejoMessage = ref("");
+const projectSettings = reactive({
+  name: "",
+  visibility: "private",
+});
+const projectSettingsBusy = ref(false);
+const projectParticipants = ref([]);
+const participantsLoading = ref(false);
+const collaboratorBusy = ref(false);
+const collaboratorUserId = ref("");
+const inviteBusy = ref(false);
+const inviteLink = ref("");
+const inviteHandlingBusy = ref(false);
+const liveSyncEnabled = ref(true);
+const liveSyncBusy = ref(false);
+const lastKnownFileUpdatedAt = ref("");
+const realtimePeers = ref([]);
+const chatMessages = ref([]);
+const chatDraft = ref("");
+const chatSending = ref(false);
+const realtimeBusy = ref(false);
+const lastChatId = ref(0);
+const editorSyncBusy = ref(false);
+const realtimeClientId = ref(getOrCreateRealtimeClientId());
+
+let editorDocRevision = 0;
+let editorDocSyncedPath = "";
+let editorStateBootstrapping = false;
+let editorSyncPendingOps = [];
+let editorSyncInflightOp = null;
+let editorDeferredRemoteOps = [];
+
+let presenceIntervalTimerId = null;
+let presenceDebounceTimerId = null;
+let presencePruneTimerId = null;
+let editorSyncDebounceTimerId = null;
+let autosaveDebounceTimerId = null;
+let reconnectTimerId = null;
+let treeRefreshTimerId = null;
+let editorSyncRetryTimerId = null;
+let applyingRemoteEditorSync = false;
+let activeRealtimeProjectId = "";
+let editorResizeFrameId = null;
+let paneResizeState = null;
 
 const notice = ref("");
 const error = ref("");
 
 const canUseProjectFs = computed(() => isAuthenticated.value && isProjectRoute.value && Boolean(selectedProjectId.value));
+const canResizeChatPane = computed(() => canUseProjectFs.value && viewportWidth.value > 1260);
+const canResizeSidebarPane = computed(() => {
+  if (!showSidebar.value) {
+    return false;
+  }
+
+  if (canUseProjectFs.value) {
+    return viewportWidth.value > 1260;
+  }
+
+  return viewportWidth.value > 1040;
+});
+const editorLayoutStyle = computed(() => {
+  const style = {};
+
+  if (showSidebar.value && sidebarResized.value) {
+    style["--editor-sidebar-width"] = `${Math.round(sidebarWidth.value)}px`;
+  }
+
+  if (canUseProjectFs.value && chatResized.value) {
+    style["--editor-chat-width"] = `${Math.round(chatWidth.value)}px`;
+  }
+
+  return style;
+});
+const currentUserId = computed(() => Number(session.value?.user?.user_id || 0));
+const isProjectOwner = computed(() => {
+  const sessionUserId = Number(session.value?.user?.user_id);
+  const ownerId = Number(projectMeta.value?.owner_id);
+
+  if (!sessionUserId || !ownerId) {
+    return false;
+  }
+
+  return sessionUserId === ownerId;
+});
+const canManageProjectSettings = computed(() => canUseProjectFs.value && isProjectOwner.value);
+const canSyncFromForgejo = computed(() => {
+  if (!canUseProjectFs.value || !isProjectOwner.value) {
+    return false;
+  }
+
+  return Boolean(projectMeta.value?.git_enabled)
+    && Boolean(projectMeta.value?.forgejo_repo_clone_url || projectMeta.value?.forgejo_repo_full_name);
+});
+const syncBusy = computed(() => treeLoading.value || repoSyncBusy.value);
 const canDownloadSelectedFolder = computed(() => {
   return canUseProjectFs.value && selectedTreeType.value === "folder" && Boolean(selectedTreePath.value);
 });
@@ -382,17 +638,6 @@ const canMoveSelectedToRoot = computed(() => {
 const workspaceTitle = computed(() => {
   if (!isProjectRoute.value) {
     return t("editor.workspace");
-  }
-
-  if (projectName.value) {
-    return projectName.value;
-  }
-
-  return t("editor.toolbarProject", { id: selectedProjectId.value });
-});
-const toolbarContextLabel = computed(() => {
-  if (!isProjectRoute.value) {
-    return t("editor.toolbarGuest");
   }
 
   if (projectName.value) {
@@ -495,6 +740,273 @@ function restoreGuest() {
   } catch (_e) {
     // ignore
   }
+}
+
+function clampNumber(value, min, max) {
+  if (!Number.isFinite(value)) {
+    return min;
+  }
+
+  return Math.min(max, Math.max(min, value));
+}
+
+function measurePaneWidth(paneRef, fallback) {
+  const pane = paneRef?.value;
+  if (!pane) {
+    return fallback;
+  }
+
+  const width = pane.getBoundingClientRect().width;
+  if (!Number.isFinite(width) || width <= 0) {
+    return fallback;
+  }
+
+  return width;
+}
+
+function measureSidebarWidth() {
+  if (sidebarResized.value) {
+    return sidebarWidth.value;
+  }
+
+  return measurePaneWidth(editorSidebarPane, canUseProjectFs.value ? 240 : 360);
+}
+
+function measureChatWidth() {
+  if (chatResized.value) {
+    return chatWidth.value;
+  }
+
+  return measurePaneWidth(editorChatPane, 340);
+}
+
+function resolveLayoutWidth() {
+  const host = editorLayoutHost.value;
+  if (!host) {
+    return 0;
+  }
+
+  const width = host.getBoundingClientRect().width;
+  if (!Number.isFinite(width) || width <= 0) {
+    return 0;
+  }
+
+  return width;
+}
+
+function resolveSidebarMax(layoutWidth, currentChatWidth) {
+  const splitters = canUseProjectFs.value ? SPLITTER_WIDTH * 2 : SPLITTER_WIDTH;
+  const available = layoutWidth - splitters - MAIN_MIN_WIDTH - (canUseProjectFs.value ? currentChatWidth : 0);
+  const bounded = Math.min(SIDEBAR_MAX_WIDTH, available);
+
+  return Math.max(SIDEBAR_MIN_WIDTH, bounded);
+}
+
+function resolveChatMax(layoutWidth, currentSidebarWidth) {
+  const available = layoutWidth - (SPLITTER_WIDTH * 2) - MAIN_MIN_WIDTH - currentSidebarWidth;
+  const bounded = Math.min(CHAT_MAX_WIDTH, available);
+
+  return Math.max(CHAT_MIN_WIDTH, bounded);
+}
+
+function normalizeEditorLayoutWidths() {
+  const width = resolveLayoutWidth();
+  if (!width || viewportWidth.value <= 1040 || !showSidebar.value) {
+    return;
+  }
+
+  const measuredSidebar = measureSidebarWidth();
+
+  if (canUseProjectFs.value && viewportWidth.value > 1260) {
+    const measuredChat = measureChatWidth();
+    const safeSidebar = clampNumber(measuredSidebar, SIDEBAR_MIN_WIDTH, resolveSidebarMax(width, measuredChat));
+    const safeChat = clampNumber(measuredChat, CHAT_MIN_WIDTH, resolveChatMax(width, safeSidebar));
+
+    if (sidebarResized.value) {
+      sidebarWidth.value = safeSidebar;
+    }
+
+    if (chatResized.value) {
+      chatWidth.value = safeChat;
+    }
+
+    return;
+  }
+
+  if (canResizeSidebarPane.value) {
+    const safeSidebar = clampNumber(
+      measuredSidebar,
+      SIDEBAR_MIN_WIDTH,
+      Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, width - SPLITTER_WIDTH - MAIN_MIN_WIDTH)),
+    );
+
+    if (sidebarResized.value) {
+      sidebarWidth.value = safeSidebar;
+    }
+  }
+}
+
+function scheduleEditorResize() {
+  if (!editor || typeof window === "undefined") {
+    return;
+  }
+
+  if (editorResizeFrameId !== null) {
+    return;
+  }
+
+  editorResizeFrameId = window.requestAnimationFrame(() => {
+    editorResizeFrameId = null;
+    editor.resize();
+  });
+}
+
+function persistEditorLayoutPrefs() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    const payload = {
+      sidebar_width: sidebarResized.value ? Math.round(sidebarWidth.value) : null,
+      chat_width: chatResized.value ? Math.round(chatWidth.value) : null,
+    };
+
+    window.localStorage.setItem(LAYOUT_KEY, JSON.stringify(payload));
+  } catch (_error) {
+    // Ignore localStorage write failures.
+  }
+}
+
+function restoreEditorLayoutPrefs() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(LAYOUT_KEY);
+    if (!raw) {
+      return;
+    }
+
+    const payload = JSON.parse(raw);
+    const persistedSidebar = Number(payload?.sidebar_width);
+    const persistedChat = Number(payload?.chat_width);
+
+    if (Number.isFinite(persistedSidebar) && persistedSidebar > 0) {
+      sidebarWidth.value = persistedSidebar;
+      sidebarResized.value = true;
+    }
+
+    if (Number.isFinite(persistedChat) && persistedChat > 0) {
+      chatWidth.value = persistedChat;
+      chatResized.value = true;
+    }
+  } catch (_error) {
+    // Ignore malformed localStorage data.
+  }
+}
+
+function stopPaneResize() {
+  if (typeof window !== "undefined") {
+    window.removeEventListener("pointermove", onPaneResizeMove);
+    window.removeEventListener("pointerup", stopPaneResize);
+    window.removeEventListener("pointercancel", stopPaneResize);
+    document.body.classList.remove("is-resizing-editor-layout");
+  }
+
+  if (!paneResizeState) {
+    activeResizePane.value = "";
+    return;
+  }
+
+  paneResizeState = null;
+  activeResizePane.value = "";
+  persistEditorLayoutPrefs();
+  scheduleEditorResize();
+}
+
+function onPaneResizeMove(event) {
+  if (!paneResizeState) {
+    return;
+  }
+
+  const width = resolveLayoutWidth();
+  if (!width) {
+    return;
+  }
+
+  if (paneResizeState.pane === "sidebar") {
+    const delta = event.clientX - paneResizeState.startX;
+    const chatReserve = canUseProjectFs.value ? (chatResized.value ? chatWidth.value : paneResizeState.startChatWidth) : 0;
+    const maxSidebar = canUseProjectFs.value
+      ? resolveSidebarMax(width, chatReserve)
+      : Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, width - SPLITTER_WIDTH - MAIN_MIN_WIDTH));
+
+    sidebarWidth.value = clampNumber(
+      paneResizeState.startSidebarWidth + delta,
+      SIDEBAR_MIN_WIDTH,
+      maxSidebar,
+    );
+    sidebarResized.value = true;
+    scheduleEditorResize();
+    return;
+  }
+
+  if (paneResizeState.pane === "chat" && canUseProjectFs.value) {
+    const delta = event.clientX - paneResizeState.startX;
+    const sidebarReserve = sidebarResized.value ? sidebarWidth.value : paneResizeState.startSidebarWidth;
+    const maxChat = resolveChatMax(width, sidebarReserve);
+
+    chatWidth.value = clampNumber(
+      paneResizeState.startChatWidth - delta,
+      CHAT_MIN_WIDTH,
+      maxChat,
+    );
+    chatResized.value = true;
+    scheduleEditorResize();
+  }
+}
+
+function startPaneResize(pane, event) {
+  if (event.button !== 0) {
+    return;
+  }
+
+  if (pane === "sidebar" && !canResizeSidebarPane.value) {
+    return;
+  }
+
+  if (pane === "chat" && !canResizeChatPane.value) {
+    return;
+  }
+
+  paneResizeState = {
+    pane,
+    startX: event.clientX,
+    startSidebarWidth: measureSidebarWidth(),
+    startChatWidth: measureChatWidth(),
+  };
+  activeResizePane.value = pane;
+
+  if (typeof window !== "undefined") {
+    window.addEventListener("pointermove", onPaneResizeMove);
+    window.addEventListener("pointerup", stopPaneResize);
+    window.addEventListener("pointercancel", stopPaneResize);
+    document.body.classList.add("is-resizing-editor-layout");
+  }
+
+  event.preventDefault();
+}
+
+function onViewportResize() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  viewportWidth.value = window.innerWidth;
+  normalizeEditorLayoutWidths();
+  scheduleEditorResize();
 }
 
 function isExpanded(path) {
@@ -775,7 +1287,9 @@ function switchToGuest() {
   activeProjectPath.value = "";
   currentPath.value = guest.path;
   currentText.value = guest.content;
+  lastKnownFileUpdatedAt.value = "";
   dirty.value = false;
+  resetEditorSyncState();
   syncEditor();
 }
 
@@ -784,7 +1298,9 @@ function clearProjectEditor() {
   activeProjectPath.value = "";
   currentPath.value = "";
   currentText.value = "";
+  lastKnownFileUpdatedAt.value = "";
   dirty.value = false;
+  resetEditorSyncState();
   syncEditor();
 }
 
@@ -820,6 +1336,8 @@ function syncProjectIdFromRoute() {
 async function loadProjectName() {
   if (!isProjectRoute.value || !isAuthenticated.value || !selectedProjectId.value) {
     projectName.value = "";
+    projectMeta.value = null;
+    resetProjectSettingsState();
     return;
   }
 
@@ -832,13 +1350,25 @@ async function loadProjectName() {
       auth: true,
     });
 
-    const name = typeof response.data?.name === "string" ? response.data.name.trim() : "";
+    const payload = response.data || {};
+    const name = typeof payload?.name === "string" ? payload.name.trim() : "";
     if (selectedProjectId.value === requestedId) {
       projectName.value = name;
+      projectMeta.value = payload;
+      projectSettings.name = name;
+      projectSettings.visibility = payload?.is_public ? "public" : "private";
+
+      if (canManageProjectSettings.value) {
+        void loadProjectParticipants();
+      } else {
+        resetProjectSettingsState();
+      }
     }
   } catch (_error) {
     if (selectedProjectId.value === requestedId) {
       projectName.value = "";
+      projectMeta.value = null;
+      resetProjectSettingsState();
     }
   }
 }
@@ -854,6 +1384,1189 @@ function resetProjectTreeState() {
   selectedTreeType.value = "";
   cancelCreateNode();
   resetDragState();
+}
+
+function resetProjectSettingsState() {
+  projectSettings.name = "";
+  projectSettings.visibility = "private";
+  projectParticipants.value = [];
+  collaboratorUserId.value = "";
+  inviteLink.value = "";
+}
+
+function clearRealtimeTimers() {
+  if (presenceIntervalTimerId !== null) {
+    window.clearInterval(presenceIntervalTimerId);
+    presenceIntervalTimerId = null;
+  }
+
+  if (presenceDebounceTimerId !== null) {
+    window.clearTimeout(presenceDebounceTimerId);
+    presenceDebounceTimerId = null;
+  }
+
+  if (presencePruneTimerId !== null) {
+    window.clearInterval(presencePruneTimerId);
+    presencePruneTimerId = null;
+  }
+
+  if (editorSyncDebounceTimerId !== null) {
+    window.clearTimeout(editorSyncDebounceTimerId);
+    editorSyncDebounceTimerId = null;
+  }
+
+  if (autosaveDebounceTimerId !== null) {
+    window.clearTimeout(autosaveDebounceTimerId);
+    autosaveDebounceTimerId = null;
+  }
+
+  if (reconnectTimerId !== null) {
+    window.clearTimeout(reconnectTimerId);
+    reconnectTimerId = null;
+  }
+
+  if (treeRefreshTimerId !== null) {
+    window.clearTimeout(treeRefreshTimerId);
+    treeRefreshTimerId = null;
+  }
+
+  if (editorSyncRetryTimerId !== null) {
+    window.clearTimeout(editorSyncRetryTimerId);
+    editorSyncRetryTimerId = null;
+  }
+}
+
+function resetEditorSyncState() {
+  editorSyncBusy.value = false;
+  applyingRemoteEditorSync = false;
+  editorStateBootstrapping = false;
+  editorDocRevision = 0;
+  editorDocSyncedPath = "";
+  editorSyncPendingOps = [];
+  editorSyncInflightOp = null;
+  editorDeferredRemoteOps = [];
+}
+
+function stopRealtimeSession() {
+  clearRealtimeTimers();
+
+  if (activeRealtimeProjectId) {
+    leaveProjectRealtimeChannel(activeRealtimeProjectId);
+    activeRealtimeProjectId = "";
+  }
+}
+
+function resetRealtimeState() {
+  stopRealtimeSession();
+  realtimePeers.value = [];
+  chatMessages.value = [];
+  chatDraft.value = "";
+  lastChatId.value = 0;
+  liveSyncBusy.value = false;
+  realtimeBusy.value = false;
+  resetEditorSyncState();
+  lastKnownFileUpdatedAt.value = "";
+  disconnectRealtimeClient();
+}
+
+function formatChatTimestamp(rawValue) {
+  const value = String(rawValue || "");
+  if (!value) {
+    return "";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat(locale.value === "ru" ? "ru-RU" : "en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(parsed);
+}
+
+function normalizeChatMessage(item) {
+  return {
+    id: Number(item?.id || 0),
+    user_id: Number(item?.user_id || 0),
+    user_name: String(item?.user_name || ""),
+    message: String(item?.message || ""),
+    created_at: String(item?.created_at || ""),
+    created_at_label: formatChatTimestamp(item?.created_at),
+  };
+}
+
+function normalizePeer(item) {
+  const userId = Number(item?.user_id || 0);
+  if (!Number.isInteger(userId) || userId <= 0 || userId === currentUserId.value) {
+    return null;
+  }
+
+  return {
+    user_id: userId,
+    name: String(item?.name || ""),
+    path: String(item?.path || ""),
+    cursor_row: item?.cursor_row === null || item?.cursor_row === undefined ? null : Number(item.cursor_row),
+    cursor_column: item?.cursor_column === null || item?.cursor_column === undefined ? null : Number(item.cursor_column),
+    seen_at: Number(item?.seen_at || 0),
+  };
+}
+
+function sortPeers(peers) {
+  return [...peers].sort((left, right) => {
+    const leftName = String(left?.name || "");
+    const rightName = String(right?.name || "");
+    return leftName.localeCompare(rightName, locale.value === "ru" ? "ru-RU" : "en-US");
+  });
+}
+
+function setRealtimePeers(peers) {
+  const normalized = peers
+    .map((peer) => normalizePeer(peer))
+    .filter((peer) => Boolean(peer));
+
+  realtimePeers.value = sortPeers(normalized);
+}
+
+function upsertRealtimePeer(rawPeer) {
+  const peer = normalizePeer(rawPeer);
+  if (!peer) {
+    return;
+  }
+
+  const next = realtimePeers.value.filter((item) => item.user_id !== peer.user_id);
+  next.push(peer);
+  realtimePeers.value = sortPeers(next);
+}
+
+function pruneRealtimePeers() {
+  const threshold = Math.floor(Date.now() / 1000) - 25;
+  realtimePeers.value = realtimePeers.value.filter((peer) => Number(peer?.seen_at || 0) >= threshold);
+}
+
+function appendChatMessage(rawMessage) {
+  const message = normalizeChatMessage(rawMessage);
+  if (message.id <= 0) {
+    return;
+  }
+
+  if (chatMessages.value.some((item) => item.id === message.id)) {
+    return;
+  }
+
+  chatMessages.value = [...chatMessages.value, message]
+    .sort((left, right) => left.id - right.id)
+    .slice(-150);
+  lastChatId.value = Math.max(lastChatId.value, message.id);
+}
+
+function buildPresencePayload() {
+  const payload = {
+    path: isProjectMode.value ? activeProjectPath.value : "",
+  };
+
+  if (editor && isProjectMode.value && activeProjectPath.value) {
+    const cursor = editor.getCursorPosition();
+    payload.cursor_row = Number(cursor?.row ?? 0);
+    payload.cursor_column = Number(cursor?.column ?? 0);
+  }
+
+  return payload;
+}
+
+async function syncRealtimePresence() {
+  if (!canUseProjectFs.value || !selectedProjectId.value || realtimeBusy.value) {
+    return;
+  }
+
+  realtimeBusy.value = true;
+
+  try {
+    const response = await request({
+      method: "POST",
+      path: `/projects/${selectedProjectId.value}/realtime/heartbeat`,
+      auth: true,
+      body: buildPresencePayload(),
+    });
+
+    const peers = Array.isArray(response.data?.peers) ? response.data.peers : [];
+    setRealtimePeers(peers);
+  } catch (_error) {
+    // Best effort: next heartbeat retries automatically.
+  } finally {
+    realtimeBusy.value = false;
+  }
+}
+
+function schedulePresenceSync(delay = 300) {
+  if (typeof window === "undefined" || !canUseProjectFs.value) {
+    return;
+  }
+
+  if (presenceDebounceTimerId !== null) {
+    window.clearTimeout(presenceDebounceTimerId);
+  }
+
+  presenceDebounceTimerId = window.setTimeout(() => {
+    presenceDebounceTimerId = null;
+    void syncRealtimePresence();
+  }, delay);
+}
+
+async function loadChatMessages() {
+  if (!canUseProjectFs.value || !selectedProjectId.value) {
+    return;
+  }
+
+  try {
+    const response = await request({
+      method: "GET",
+      path: `/projects/${selectedProjectId.value}/realtime/chat`,
+      auth: true,
+      query: {
+        after_id: 0,
+        limit: 150,
+      },
+    });
+
+    const incomingRaw = Array.isArray(response.data?.messages) ? response.data.messages : [];
+    const incoming = incomingRaw
+      .map((item) => normalizeChatMessage(item))
+      .filter((item) => item.id > 0);
+
+    chatMessages.value = incoming.slice(-150);
+    const latest = Number(response.data?.latest_id || 0);
+    lastChatId.value = Number.isFinite(latest) ? Math.max(0, latest) : 0;
+  } catch (_error) {
+    // Best effort bootstrap. New messages still come via websocket channel.
+  }
+}
+
+function canSyncEditorRealtime() {
+  return liveSyncEnabled.value
+    && canUseProjectFs.value
+    && isProjectMode.value
+    && Boolean(activeProjectPath.value);
+}
+
+function ensureEditorSyncPathState(pathValue = activeProjectPath.value) {
+  const path = String(pathValue || "");
+  if (!path) {
+    resetEditorSyncState();
+    return;
+  }
+
+  if (editorDocSyncedPath === path) {
+    return;
+  }
+
+  editorDocSyncedPath = path;
+  editorDocRevision = 0;
+  editorSyncPendingOps = [];
+  editorSyncInflightOp = null;
+  editorDeferredRemoteOps = [];
+  editorSyncBusy.value = false;
+}
+
+function setEditorContentFromRealtime(contentInput = "", keepDirty = false) {
+  const content = String(contentInput ?? "");
+  applyingRemoteEditorSync = true;
+  syncingEditor = true;
+  currentText.value = content;
+
+  if (editor) {
+    editor.session.setValue(content);
+  }
+
+  syncingEditor = false;
+  applyingRemoteEditorSync = false;
+  dirty.value = keepDirty ? dirty.value : false;
+}
+
+function applyEditorTextOperation(operationInput = {}) {
+  const operation = normalizeTextOperation(operationInput);
+  if (isNoopTextOperation(operation)) {
+    return;
+  }
+
+  if (!editor) {
+    currentText.value = applyTextOperation(currentText.value, operation);
+    return;
+  }
+
+  const documentRef = editor.session?.getDocument?.();
+  if (!documentRef || typeof documentRef.indexToPosition !== "function") {
+    currentText.value = applyTextOperation(currentText.value, operation);
+    syncEditor();
+    return;
+  }
+
+  const currentValue = editor.getValue();
+  const boundedStart = Math.max(0, Math.min(operation.start, currentValue.length));
+  const boundedDelete = Math.max(0, Math.min(operation.delete_count, currentValue.length - boundedStart));
+
+  applyingRemoteEditorSync = true;
+  syncingEditor = true;
+
+  if (boundedDelete > 0) {
+    const removeStart = documentRef.indexToPosition(boundedStart, 0);
+    const removeEnd = documentRef.indexToPosition(boundedStart + boundedDelete, 0);
+    documentRef.remove({
+      start: removeStart,
+      end: removeEnd,
+    });
+  }
+
+  if (operation.insert_text) {
+    const insertPosition = documentRef.indexToPosition(boundedStart, 0);
+    documentRef.insert(insertPosition, operation.insert_text);
+  }
+
+  currentText.value = editor.getValue();
+  syncingEditor = false;
+  applyingRemoteEditorSync = false;
+}
+
+function normalizeEditorOperationEnvelope(payload) {
+  const entryCandidate = payload?.operation && typeof payload.operation === "object"
+    ? payload.operation
+    : payload;
+  const operationCandidate = entryCandidate?.operation && typeof entryCandidate.operation === "object"
+    ? entryCandidate.operation
+    : entryCandidate;
+  const operation = normalizeTextOperation({
+    ...operationCandidate,
+    client_id: entryCandidate?.client_id ?? payload?.client_id ?? "",
+    op_id: entryCandidate?.op_id ?? payload?.op_id ?? "",
+  });
+
+  if (isNoopTextOperation(operation)) {
+    return null;
+  }
+
+  const revision = Number(entryCandidate?.revision ?? payload?.revision ?? 0);
+  return {
+    revision: Number.isFinite(revision) ? Math.max(0, revision) : 0,
+    path: String(entryCandidate?.path ?? payload?.path ?? ""),
+    user_id: Number(entryCandidate?.user_id ?? payload?.user_id ?? 0),
+    client_id: String(entryCandidate?.client_id ?? payload?.client_id ?? operation.client_id ?? ""),
+    op_id: String(entryCandidate?.op_id ?? payload?.op_id ?? operation.op_id ?? ""),
+    operation: {
+      ...operation,
+      client_id: String(entryCandidate?.client_id ?? payload?.client_id ?? operation.client_id ?? ""),
+      op_id: String(entryCandidate?.op_id ?? payload?.op_id ?? operation.op_id ?? ""),
+    },
+  };
+}
+
+function enqueueDeferredRemoteOperation(operationEnvelope) {
+  if (!operationEnvelope) {
+    return;
+  }
+
+  const exists = editorDeferredRemoteOps.some((item) => {
+    return item.revision === operationEnvelope.revision
+      && item.client_id === operationEnvelope.client_id
+      && item.op_id === operationEnvelope.op_id;
+  });
+
+  if (exists) {
+    return;
+  }
+
+  editorDeferredRemoteOps.push(operationEnvelope);
+  editorDeferredRemoteOps.sort((left, right) => left.revision - right.revision);
+}
+
+function applyRemoteEditorOperation(rawPayload) {
+  if (!liveSyncEnabled.value || !isProjectMode.value || !activeProjectPath.value) {
+    return;
+  }
+
+  const envelope = normalizeEditorOperationEnvelope(rawPayload);
+  if (!envelope) {
+    return;
+  }
+
+  if (envelope.path !== activeProjectPath.value) {
+    return;
+  }
+
+  ensureEditorSyncPathState(envelope.path);
+
+  if (envelope.revision > 0 && envelope.revision <= editorDocRevision) {
+    return;
+  }
+
+  if (envelope.client_id === realtimeClientId.value) {
+    if (editorSyncInflightOp && envelope.op_id && envelope.op_id === editorSyncInflightOp.op_id) {
+      editorDocRevision = Math.max(editorDocRevision, envelope.revision);
+      editorSyncInflightOp = null;
+      editorSyncBusy.value = false;
+      drainDeferredRemoteOperations();
+      void flushEditorSync();
+    }
+
+    return;
+  }
+
+  if (editorSyncInflightOp) {
+    enqueueDeferredRemoteOperation(envelope);
+    return;
+  }
+
+  let transformedRemote = {
+    ...envelope.operation,
+    client_id: envelope.client_id,
+    op_id: envelope.op_id,
+  };
+
+  editorSyncPendingOps = editorSyncPendingOps.map((pendingOperation) => {
+    const pair = transformConcurrentTextOperations(
+      transformedRemote,
+      pendingOperation,
+    );
+
+    transformedRemote = {
+      ...pair.remote,
+      client_id: envelope.client_id,
+      op_id: envelope.op_id,
+    };
+
+    return {
+      ...pendingOperation,
+      ...pair.local,
+      client_id: pendingOperation.client_id,
+      op_id: pendingOperation.op_id,
+      path: pendingOperation.path,
+    };
+  });
+
+  applyEditorTextOperation(transformedRemote);
+  editorDocRevision = Math.max(editorDocRevision, envelope.revision);
+  dirty.value = true;
+}
+
+function drainDeferredRemoteOperations() {
+  if (editorSyncInflightOp || editorDeferredRemoteOps.length === 0) {
+    return;
+  }
+
+  const queued = [...editorDeferredRemoteOps];
+  editorDeferredRemoteOps = [];
+
+  queued
+    .sort((left, right) => left.revision - right.revision)
+    .forEach((operationEnvelope) => {
+      applyRemoteEditorOperation(operationEnvelope);
+    });
+}
+
+function readDeltaText(delta) {
+  const lines = Array.isArray(delta?.lines) ? delta.lines : [];
+  if (lines.length === 0) {
+    return "";
+  }
+
+  const separator = typeof delta?.nl === "string" ? delta.nl : "\n";
+  return lines.join(separator);
+}
+
+function createEditorOperationFromDelta(delta) {
+  if (!editor || !delta || !delta.start) {
+    return null;
+  }
+
+  const documentRef = editor.session?.getDocument?.();
+  if (!documentRef || typeof documentRef.positionToIndex !== "function") {
+    return null;
+  }
+
+  const start = Number(documentRef.positionToIndex(delta.start, 0));
+  if (!Number.isFinite(start) || start < 0) {
+    return null;
+  }
+
+  const text = readDeltaText(delta);
+  if (delta.action === "insert") {
+    return normalizeTextOperation({
+      start,
+      delete_count: 0,
+      insert_text: text,
+    });
+  }
+
+  if (delta.action === "remove") {
+    return normalizeTextOperation({
+      start,
+      delete_count: text.length,
+      insert_text: "",
+    });
+  }
+
+  return null;
+}
+
+function tryMergePendingEditorOperation(operation) {
+  if (editorSyncPendingOps.length === 0) {
+    return false;
+  }
+
+  const lastIndex = editorSyncPendingOps.length - 1;
+  const previous = editorSyncPendingOps[lastIndex];
+  if (!previous || previous.path !== operation.path) {
+    return false;
+  }
+
+  if (
+    previous.delete_count === 0
+    && operation.delete_count === 0
+    && previous.start + previous.insert_text.length === operation.start
+  ) {
+    editorSyncPendingOps[lastIndex] = {
+      ...previous,
+      insert_text: `${previous.insert_text}${operation.insert_text}`,
+    };
+    return true;
+  }
+
+  if (
+    previous.insert_text === ""
+    && operation.insert_text === ""
+    && previous.start === operation.start
+  ) {
+    editorSyncPendingOps[lastIndex] = {
+      ...previous,
+      delete_count: previous.delete_count + operation.delete_count,
+    };
+    return true;
+  }
+
+  return false;
+}
+
+function queueLocalEditorOperation(delta) {
+  if (!canSyncEditorRealtime() || applyingRemoteEditorSync) {
+    return;
+  }
+
+  ensureEditorSyncPathState(activeProjectPath.value);
+
+  const operation = createEditorOperationFromDelta(delta);
+  if (!operation || isNoopTextOperation(operation)) {
+    return;
+  }
+
+  const queuedOperation = {
+    ...operation,
+    path: activeProjectPath.value,
+    client_id: realtimeClientId.value,
+    op_id: createRealtimeOperationId(),
+  };
+
+  if (tryMergePendingEditorOperation(queuedOperation)) {
+    scheduleEditorSync();
+    return;
+  }
+
+  editorSyncPendingOps.push(queuedOperation);
+  scheduleEditorSync();
+}
+
+async function bootstrapEditorRealtimeState(seedContent = "", options = {}) {
+  if (
+    !canUseProjectFs.value
+    || !selectedProjectId.value
+    || !isProjectMode.value
+    || !activeProjectPath.value
+    || editorStateBootstrapping
+  ) {
+    return;
+  }
+
+  ensureEditorSyncPathState(activeProjectPath.value);
+  editorStateBootstrapping = true;
+
+  const preserveLocal = Boolean(options?.preserveLocal);
+
+  try {
+    const response = await request({
+      method: "POST",
+      path: `/projects/${selectedProjectId.value}/realtime/editor-state`,
+      auth: true,
+      body: {
+        path: activeProjectPath.value,
+        seed_content: String(seedContent ?? ""),
+      },
+    });
+
+    const revision = Number(response.data?.revision || 0);
+    const remoteContent = String(response.data?.content ?? "");
+    editorDocRevision = Number.isFinite(revision) ? Math.max(0, revision) : 0;
+    editorDocSyncedPath = activeProjectPath.value;
+    editorSyncPendingOps = [];
+    editorSyncInflightOp = null;
+    editorDeferredRemoteOps = [];
+    editorSyncBusy.value = false;
+
+    if (remoteContent !== currentText.value) {
+      if (preserveLocal) {
+        const replacementOperation = normalizeTextOperation({
+          start: 0,
+          delete_count: remoteContent.length,
+          insert_text: currentText.value,
+        });
+
+        if (!isNoopTextOperation(replacementOperation)) {
+          editorSyncPendingOps = [{
+            ...replacementOperation,
+            path: activeProjectPath.value,
+            client_id: realtimeClientId.value,
+            op_id: createRealtimeOperationId(),
+          }, ...editorSyncPendingOps];
+          scheduleEditorSync();
+        }
+
+        return;
+      }
+
+      setEditorContentFromRealtime(remoteContent);
+    }
+  } catch (_error) {
+    // Best effort bootstrap. Local editing can continue and next sync will retry.
+  } finally {
+    editorStateBootstrapping = false;
+  }
+}
+
+function scheduleEditorSync() {
+  if (typeof window === "undefined" || !canSyncEditorRealtime() || applyingRemoteEditorSync) {
+    return;
+  }
+
+  if (editorSyncDebounceTimerId !== null) {
+    window.clearTimeout(editorSyncDebounceTimerId);
+  }
+
+  editorSyncDebounceTimerId = window.setTimeout(() => {
+    editorSyncDebounceTimerId = null;
+    void flushEditorSync();
+  }, 40);
+}
+
+async function flushEditorSync() {
+  if (!canSyncEditorRealtime() || applyingRemoteEditorSync || editorStateBootstrapping) {
+    return;
+  }
+
+  ensureEditorSyncPathState(activeProjectPath.value);
+
+  if (editorSyncBusy.value || editorSyncInflightOp || editorSyncPendingOps.length === 0) {
+    return;
+  }
+
+  const nextOperation = editorSyncPendingOps.shift();
+  if (!nextOperation) {
+    return;
+  }
+
+  editorSyncBusy.value = true;
+  editorSyncInflightOp = {
+    ...nextOperation,
+  };
+
+  try {
+    const payload = {
+      path: nextOperation.path,
+      client_id: nextOperation.client_id,
+      op_id: nextOperation.op_id,
+      base_revision: editorDocRevision,
+      start: nextOperation.start,
+      delete_count: nextOperation.delete_count,
+      insert_text: nextOperation.insert_text,
+      ...buildPresencePayload(),
+    };
+
+    const response = await request({
+      method: "POST",
+      path: `/projects/${selectedProjectId.value}/realtime/editor-sync`,
+      auth: true,
+      body: payload,
+    });
+
+    const revision = Number(response.data?.revision || 0);
+    if (Number.isFinite(revision) && revision > editorDocRevision) {
+      editorDocRevision = revision;
+    }
+    editorSyncInflightOp = null;
+    editorSyncBusy.value = false;
+    drainDeferredRemoteOperations();
+    if (editorSyncPendingOps.length > 0) {
+      void flushEditorSync();
+    }
+  } catch (syncError) {
+    const status = Number(syncError?.status || 0);
+
+    if (editorSyncInflightOp) {
+      editorSyncPendingOps = [editorSyncInflightOp, ...editorSyncPendingOps];
+      editorSyncInflightOp = null;
+    }
+
+    if (status === 409) {
+      const revision = Number(syncError?.data?.revision || 0);
+      if (Number.isFinite(revision) && revision >= 0) {
+        editorDocRevision = revision;
+      }
+
+      const requiresResync = Boolean(syncError?.data?.requires_resync);
+      const remoteContent = typeof syncError?.data?.content === "string"
+        ? syncError.data.content
+        : null;
+
+      if (requiresResync && typeof remoteContent === "string") {
+        setEditorContentFromRealtime(remoteContent, true);
+        editorSyncPendingOps = [];
+      }
+
+      const operations = Array.isArray(syncError?.data?.operations)
+        ? syncError.data.operations
+        : [];
+
+      operations.forEach((operationEntry) => {
+        applyRemoteEditorOperation(operationEntry);
+      });
+
+      editorSyncBusy.value = false;
+      drainDeferredRemoteOperations();
+      if (editorSyncPendingOps.length > 0) {
+        void flushEditorSync();
+      }
+      return;
+    }
+
+    editorSyncBusy.value = false;
+    if (typeof window !== "undefined" && editorSyncRetryTimerId === null) {
+      editorSyncRetryTimerId = window.setTimeout(() => {
+        editorSyncRetryTimerId = null;
+        if (editorSyncPendingOps.length > 0) {
+          void flushEditorSync();
+        }
+      }, 250);
+    }
+  } finally {
+    if (editorSyncBusy.value && !editorSyncInflightOp) {
+      editorSyncBusy.value = false;
+    }
+  }
+}
+
+function scheduleLiveSyncPersist() {
+  if (typeof window === "undefined" || !canSyncEditorRealtime()) {
+    return;
+  }
+
+  if (autosaveDebounceTimerId !== null) {
+    window.clearTimeout(autosaveDebounceTimerId);
+  }
+
+  autosaveDebounceTimerId = window.setTimeout(() => {
+    autosaveDebounceTimerId = null;
+    void persistLiveSyncChanges();
+  }, 1000);
+}
+
+async function persistLiveSyncChanges() {
+  if (!canSyncEditorRealtime() || !dirty.value) {
+    return;
+  }
+
+  if (liveSyncBusy.value || saving.value || nodeBusy.value || moveBusy.value) {
+    return;
+  }
+
+  liveSyncBusy.value = true;
+
+  try {
+    const response = await request({
+      method: "PUT",
+      path: `/projects/${selectedProjectId.value}/filesystem/file`,
+      auth: true,
+      body: {
+        path: activeProjectPath.value,
+        content: currentText.value,
+      },
+    });
+
+    dirty.value = false;
+    lastKnownFileUpdatedAt.value = String(response.data?.updated_at || "");
+  } catch (_error) {
+    // Do not block editing when autosave fails.
+  } finally {
+    liveSyncBusy.value = false;
+  }
+}
+
+function handleRealtimeFilesystemEvent(payload) {
+  if (Number(payload?.user_id || 0) === currentUserId.value) {
+    return;
+  }
+
+  if (treeRefreshTimerId !== null) {
+    return;
+  }
+
+  treeRefreshTimerId = window.setTimeout(() => {
+    treeRefreshTimerId = null;
+    void loadTree();
+  }, 400);
+}
+
+function scheduleRealtimeReconnect() {
+  if (typeof window === "undefined" || reconnectTimerId !== null || !canUseProjectFs.value) {
+    return;
+  }
+
+  reconnectTimerId = window.setTimeout(() => {
+    reconnectTimerId = null;
+
+    if (canUseProjectFs.value) {
+      void startRealtimeSession();
+    }
+  }, 1500);
+}
+
+async function startRealtimeSession() {
+  if (typeof window === "undefined" || !canUseProjectFs.value || !selectedProjectId.value) {
+    return;
+  }
+
+  stopRealtimeSession();
+
+  const token = String(session.value?.accessToken || "");
+  const channel = joinProjectRealtimeChannel(selectedProjectId.value, token);
+
+  if (!channel) {
+    scheduleRealtimeReconnect();
+    return;
+  }
+
+  activeRealtimeProjectId = selectedProjectId.value;
+
+  channel.subscribed(() => {
+    if (reconnectTimerId !== null) {
+      window.clearTimeout(reconnectTimerId);
+      reconnectTimerId = null;
+    }
+  });
+
+  channel.error(() => {
+    scheduleRealtimeReconnect();
+  });
+
+  channel.listen(".realtime.presence.updated", (payload) => {
+    upsertRealtimePeer(payload?.peer || payload);
+  });
+
+  channel.listen(".realtime.chat.message", (payload) => {
+    appendChatMessage(payload?.message || payload);
+  });
+
+  channel.listen(".realtime.editor.operation", (payload) => {
+    applyRemoteEditorOperation(payload?.operation || payload);
+  });
+
+  channel.listen(".file_created", handleRealtimeFilesystemEvent);
+  channel.listen(".folder_created", handleRealtimeFilesystemEvent);
+  channel.listen(".path_deleted", handleRealtimeFilesystemEvent);
+  channel.listen(".path_moved", handleRealtimeFilesystemEvent);
+  channel.listen(".file_saved", handleRealtimeFilesystemEvent);
+
+  await syncRealtimePresence();
+  await loadChatMessages();
+  if (liveSyncEnabled.value && isProjectMode.value && activeProjectPath.value) {
+    await bootstrapEditorRealtimeState(currentText.value);
+  }
+
+  presenceIntervalTimerId = window.setInterval(() => {
+    void syncRealtimePresence();
+  }, 10000);
+
+  presencePruneTimerId = window.setInterval(() => {
+    pruneRealtimePeers();
+  }, 3000);
+}
+
+async function sendChatMessage() {
+  if (!canUseProjectFs.value || !selectedProjectId.value || chatSending.value) {
+    return;
+  }
+
+  const text = String(chatDraft.value || "").trim();
+  if (!text) {
+    return;
+  }
+
+  chatSending.value = true;
+
+  try {
+    const response = await request({
+      method: "POST",
+      path: `/projects/${selectedProjectId.value}/realtime/chat`,
+      auth: true,
+      body: {
+        message: text,
+      },
+    });
+
+    chatDraft.value = "";
+    appendChatMessage(response.data?.message || {});
+  } catch (chatError) {
+    error.value = readError(chatError);
+  } finally {
+    chatSending.value = false;
+  }
+}
+
+async function loadProjectParticipants() {
+  if (!canManageProjectSettings.value || !selectedProjectId.value) {
+    projectParticipants.value = [];
+    return;
+  }
+
+  participantsLoading.value = true;
+
+  try {
+    const response = await request({
+      method: "GET",
+      path: "/project-participants",
+      auth: true,
+      query: {
+        project_id: selectedProjectId.value,
+        per_page: 200,
+      },
+    });
+
+    projectParticipants.value = Array.isArray(response.data?.data) ? response.data.data : [];
+  } catch (participantsError) {
+    error.value = readError(participantsError);
+  } finally {
+    participantsLoading.value = false;
+  }
+}
+
+async function saveProjectSettings() {
+  if (!canManageProjectSettings.value || !selectedProjectId.value || projectSettingsBusy.value) {
+    return;
+  }
+
+  const nextName = String(projectSettings.name || "").trim();
+  if (!nextName) {
+    error.value = t("editor.projectNameRequired");
+    return;
+  }
+
+  projectSettingsBusy.value = true;
+  error.value = "";
+
+  try {
+    const response = await request({
+      method: "PATCH",
+      path: `/projects/${selectedProjectId.value}`,
+      auth: true,
+      body: {
+        name: nextName,
+        is_public: projectSettings.visibility === "public",
+      },
+    });
+
+    const payload = response.data || {};
+    projectMeta.value = payload;
+    projectName.value = typeof payload?.name === "string" ? payload.name.trim() : nextName;
+    projectSettings.name = projectName.value;
+    projectSettings.visibility = payload?.is_public ? "public" : "private";
+    notice.value = t("editor.projectSettingsSaved");
+  } catch (settingsError) {
+    error.value = readError(settingsError);
+  } finally {
+    projectSettingsBusy.value = false;
+  }
+}
+
+async function addCollaboratorById() {
+  if (!canManageProjectSettings.value || !selectedProjectId.value || collaboratorBusy.value) {
+    return;
+  }
+
+  const userId = Number.parseInt(String(collaboratorUserId.value || "").trim(), 10);
+  if (!Number.isInteger(userId) || userId <= 0) {
+    error.value = t("editor.invalidCollaboratorId");
+    return;
+  }
+
+  collaboratorBusy.value = true;
+  error.value = "";
+
+  try {
+    await request({
+      method: "POST",
+      path: "/project-participants",
+      auth: true,
+      body: {
+        project_id: Number(selectedProjectId.value),
+        user_id: userId,
+      },
+    });
+
+    collaboratorUserId.value = "";
+    await loadProjectParticipants();
+    notice.value = t("editor.collaboratorAdded");
+  } catch (participantError) {
+    error.value = readError(participantError);
+  } finally {
+    collaboratorBusy.value = false;
+  }
+}
+
+async function removeCollaborator(participant) {
+  if (!canManageProjectSettings.value || !participant?.participant_id || collaboratorBusy.value) {
+    return;
+  }
+
+  collaboratorBusy.value = true;
+  error.value = "";
+
+  try {
+    await request({
+      method: "DELETE",
+      path: `/project-participants/${participant.participant_id}`,
+      auth: true,
+    });
+
+    await loadProjectParticipants();
+    notice.value = t("editor.collaboratorRemoved");
+  } catch (participantError) {
+    error.value = readError(participantError);
+  } finally {
+    collaboratorBusy.value = false;
+  }
+}
+
+async function createInviteLink() {
+  if (!canManageProjectSettings.value || !selectedProjectId.value || inviteBusy.value) {
+    return;
+  }
+
+  inviteBusy.value = true;
+  error.value = "";
+
+  try {
+    const response = await request({
+      method: "POST",
+      path: "/project-invitations",
+      auth: true,
+      body: {
+        project_id: Number(selectedProjectId.value),
+      },
+    });
+
+    const token = String(response.data?.invite_token || "");
+    if (!token) {
+      throw new Error(t("common.requestFailed"));
+    }
+
+    const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
+    const invitePath = `/projects/${selectedProjectId.value}/editor?invite=${encodeURIComponent(token)}`;
+    inviteLink.value = baseUrl ? `${baseUrl}${invitePath}` : invitePath;
+    notice.value = t("editor.inviteLinkReady");
+  } catch (inviteError) {
+    error.value = readError(inviteError);
+  } finally {
+    inviteBusy.value = false;
+  }
+}
+
+async function copyInviteLink() {
+  if (!inviteLink.value) {
+    return;
+  }
+
+  try {
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(inviteLink.value);
+      notice.value = t("editor.inviteLinkCopied");
+      return;
+    }
+  } catch (_error) {
+    // fallback below
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = inviteLink.value;
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  document.execCommand("copy");
+  textarea.remove();
+  notice.value = t("editor.inviteLinkCopied");
+}
+
+async function acceptInviteFromQuery() {
+  if (!isAuthenticated.value || inviteHandlingBusy.value) {
+    return;
+  }
+
+  const inviteToken = typeof route.query.invite === "string" ? route.query.invite.trim() : "";
+  if (!inviteToken) {
+    return;
+  }
+
+  inviteHandlingBusy.value = true;
+
+  try {
+    const response = await request({
+      method: "POST",
+      path: "/project-invitations/accept",
+      auth: true,
+      body: {
+        invite_token: inviteToken,
+      },
+    });
+
+    const acceptedProjectId = String(response.data?.project_id || "").trim();
+    const acceptedProjectName = String(response.data?.project_name || "").trim();
+    notice.value = acceptedProjectName
+      ? t("editor.inviteAcceptedProject", { name: acceptedProjectName })
+      : t("editor.inviteAccepted");
+    error.value = "";
+
+    const query = { ...route.query };
+    delete query.invite;
+
+    if (acceptedProjectId && acceptedProjectId !== selectedProjectId.value) {
+      await router.replace({
+        path: `/projects/${acceptedProjectId}/editor`,
+        query,
+      });
+      return;
+    }
+
+    await router.replace({ query });
+    if (acceptedProjectId && acceptedProjectId === selectedProjectId.value) {
+      void loadProjectName();
+      void loadTree();
+    }
+  } catch (inviteError) {
+    error.value = readError(inviteError);
+
+    const query = { ...route.query };
+    delete query.invite;
+    await router.replace({ query });
+  } finally {
+    inviteHandlingBusy.value = false;
+  }
 }
 
 function startCreateNode(kind) {
@@ -1051,9 +2764,14 @@ async function openFile(path) {
     selectTreeItem(path, "file");
     currentPath.value = path;
     currentText.value = response.data?.content || "";
+    lastKnownFileUpdatedAt.value = String(response.data?.updated_at || "");
     dirty.value = false;
     expandParents(path);
     syncEditor();
+    ensureEditorSyncPathState(path);
+    if (liveSyncEnabled.value) {
+      await bootstrapEditorRealtimeState(currentText.value);
+    }
   } catch (openError) {
     error.value = readError(openError);
   }
@@ -1144,7 +2862,7 @@ async function saveFile() {
   saving.value = true;
 
   try {
-    await request({
+    const response = await request({
       method: "PUT",
       path: `/projects/${selectedProjectId.value}/filesystem/file`,
       auth: true,
@@ -1155,6 +2873,7 @@ async function saveFile() {
     });
 
     dirty.value = false;
+    lastKnownFileUpdatedAt.value = String(response.data?.updated_at || "");
     notice.value = t("editor.fileSaved");
     await loadTree();
   } catch (saveError) {
@@ -1222,15 +2941,22 @@ async function connectProjectForgejo() {
 
   try {
     const body = forgejoMode.value === "existing"
-      ? { mode: "existing", owner: forgejoOwner.value, repo: forgejoRepo.value }
+      ? { mode: "existing", repo_url: forgejoRepoUrl.value }
       : { mode: "create", repo_name: forgejoRepoName.value || "project", private: true };
 
-    await request({
+    const response = await request({
       method: "POST",
       path: `/projects/${selectedProjectId.value}/forgejo/connect`,
       auth: true,
       body,
     });
+
+    if (response.data && typeof response.data === "object") {
+      projectMeta.value = response.data;
+      if (typeof response.data?.name === "string" && response.data.name.trim() !== "") {
+        projectName.value = response.data.name.trim();
+      }
+    }
 
     notice.value = t("editor.connectedRepo");
   } catch (connectError) {
@@ -1269,13 +2995,54 @@ async function pushToForgejo() {
   }
 }
 
+async function syncProjectWorkspace() {
+  if (!canUseProjectFs.value || !selectedProjectId.value || syncBusy.value) {
+    return;
+  }
+
+  if (!canSyncFromForgejo.value) {
+    await loadTree();
+    return;
+  }
+
+  repoSyncBusy.value = true;
+  error.value = "";
+  notice.value = "";
+
+  try {
+    const response = await request({
+      method: "POST",
+      path: `/projects/${selectedProjectId.value}/forgejo/sync`,
+      auth: true,
+      body: {},
+    });
+
+    await loadTree();
+
+    if (isProjectMode.value && activeProjectPath.value && !dirty.value && hasPath(activeProjectPath.value, tree.value)) {
+      await openFile(activeProjectPath.value);
+    }
+
+    notice.value = response.data?.status === "up_to_date"
+      ? t("editor.repoUpToDate")
+      : t("editor.repoSynced");
+  } catch (syncError) {
+    error.value = readError(syncError);
+  } finally {
+    repoSyncBusy.value = false;
+  }
+}
+
 function onAuthChanged() {
   session.value = getSession();
 
   if (!isAuthenticated.value) {
     selectedProjectId.value = "";
     projectName.value = "";
+    projectMeta.value = null;
     resetProjectTreeState();
+    resetProjectSettingsState();
+    resetRealtimeState();
     switchToGuest();
     return;
   }
@@ -1283,13 +3050,19 @@ function onAuthChanged() {
   if (!isProjectRoute.value) {
     selectedProjectId.value = "";
     projectName.value = "";
+    projectMeta.value = null;
     resetProjectTreeState();
+    resetProjectSettingsState();
+    resetRealtimeState();
     return;
   }
 
   if (!selectedProjectId.value) {
     projectName.value = "";
+    projectMeta.value = null;
     resetProjectTreeState();
+    resetProjectSettingsState();
+    resetRealtimeState();
     switchToGuest();
     return;
   }
@@ -1300,6 +3073,7 @@ function onAuthChanged() {
 
   void loadProjectName();
   void loadTree();
+  void acceptInviteFromQuery();
 }
 
 function parseDownloadFileName(disposition, fallbackName) {
@@ -1423,13 +3197,19 @@ function initEditor() {
   editor.session.setMode(`ace/mode/${editorLanguage.value}`);
   editor.session.setValue(currentText.value);
 
-  editor.on("change", () => {
+  editor.on("change", (delta) => {
     if (syncingEditor) {
       return;
     }
 
     currentText.value = editor.getValue();
     dirty.value = true;
+    queueLocalEditorOperation(delta);
+    scheduleLiveSyncPersist();
+  });
+
+  editor.selection.on("changeCursor", () => {
+    schedulePresenceSync(200);
   });
 }
 
@@ -1449,7 +3229,10 @@ watch(editorTheme, (value) => {
 watch(selectedProjectId, (value) => {
   if (!value || !isProjectRoute.value || !isAuthenticated.value) {
     projectName.value = "";
+    projectMeta.value = null;
     resetProjectTreeState();
+    resetProjectSettingsState();
+    resetRealtimeState();
     return;
   }
 
@@ -1460,6 +3243,8 @@ watch(selectedProjectId, (value) => {
   selectProjectRoot();
   void loadProjectName();
   void loadTree();
+  void acceptInviteFromQuery();
+  void startRealtimeSession();
 });
 
 watch(
@@ -1470,20 +3255,90 @@ watch(
     if (!isProjectRoute.value) {
       selectedProjectId.value = "";
       projectName.value = "";
+      projectMeta.value = null;
       resetProjectTreeState();
+      resetProjectSettingsState();
+      resetRealtimeState();
       switchToGuest();
       return;
     }
 
     if (!selectedProjectId.value) {
       projectName.value = "";
+      projectMeta.value = null;
       resetProjectTreeState();
+      resetProjectSettingsState();
+      resetRealtimeState();
       switchToGuest();
     }
   },
 );
 
+watch(
+  () => route.query.invite,
+  () => {
+    void acceptInviteFromQuery();
+  },
+);
+
+watch(
+  canUseProjectFs,
+  (enabled) => {
+    if (enabled) {
+      void startRealtimeSession();
+      return;
+    }
+
+    resetRealtimeState();
+  },
+  { immediate: true },
+);
+
+watch(activeProjectPath, () => {
+  lastKnownFileUpdatedAt.value = "";
+  if (!activeProjectPath.value) {
+    resetEditorSyncState();
+  } else {
+    ensureEditorSyncPathState(activeProjectPath.value);
+  }
+  schedulePresenceSync(0);
+});
+
+watch(liveSyncEnabled, (enabled) => {
+  if (!enabled) {
+    return;
+  }
+
+  if (isProjectMode.value && activeProjectPath.value) {
+    void bootstrapEditorRealtimeState(currentText.value, { preserveLocal: true });
+    scheduleEditorSync();
+  }
+});
+
+watch(
+  [showSidebar, canUseProjectFs, canResizeSidebarPane, canResizeChatPane],
+  async () => {
+    if (!showSidebar.value) {
+      stopPaneResize();
+    }
+
+    if (!canResizeSidebarPane.value && activeResizePane.value === "sidebar") {
+      stopPaneResize();
+    }
+
+    if (!canResizeChatPane.value && activeResizePane.value === "chat") {
+      stopPaneResize();
+    }
+
+    await nextTick();
+    normalizeEditorLayoutWidths();
+    scheduleEditorResize();
+  },
+  { immediate: true },
+);
+
 onMounted(() => {
+  restoreEditorLayoutPrefs();
   restoreGuest();
   editorTheme.value = resolveDefaultEditorTheme();
   syncProjectIdFromRoute();
@@ -1495,13 +3350,35 @@ onMounted(() => {
     router.replace({ query });
   }
 
+  if (typeof window !== "undefined") {
+    viewportWidth.value = window.innerWidth;
+    window.addEventListener("resize", onViewportResize);
+  }
+
   window.addEventListener("auth-changed", onAuthChanged);
   initEditor();
   onAuthChanged();
+  nextTick(() => {
+    normalizeEditorLayoutWidths();
+    scheduleEditorResize();
+  });
 });
 
 onUnmounted(() => {
+  stopPaneResize();
+
+  if (typeof window !== "undefined") {
+    window.removeEventListener("resize", onViewportResize);
+  }
+
   window.removeEventListener("auth-changed", onAuthChanged);
+  stopRealtimeSession();
+  disconnectRealtimeClient();
+
+  if (typeof window !== "undefined" && editorResizeFrameId !== null) {
+    window.cancelAnimationFrame(editorResizeFrameId);
+    editorResizeFrameId = null;
+  }
 
   if (editor) {
     editor.destroy();

@@ -203,10 +203,6 @@ class ProjectFilesystemService
      */
     public function createZipArchive(Project $project, ?string $relativePath = null): array
     {
-        if (! class_exists(ZipArchive::class)) {
-            throw new InvalidArgumentException('zip_unavailable');
-        }
-
         $disk = Storage::disk('local');
         $projectRoot = $this->projectRoot($project);
 
@@ -240,6 +236,32 @@ class ProjectFilesystemService
 
         $archiveSuffix = str_replace('.', '', uniqid('', true));
         $archivePath = $archiveDir.'/project-'.$project->project_id.'-'.$archiveSuffix.'.zip';
+        @unlink($archivePath);
+
+        if (class_exists(ZipArchive::class)) {
+            $this->createZipWithPhpExtension($sourceAbsolutePath, $archivePath, $archiveRootName);
+        } else {
+            $created = $this->createZipWithSystemTool($sourceAbsolutePath, $archivePath);
+
+            if (! $created) {
+                @unlink($archivePath);
+                throw new InvalidArgumentException('zip_unavailable');
+            }
+        }
+
+        if (! is_file($archivePath) || (int) filesize($archivePath) <= 0) {
+            @unlink($archivePath);
+            throw new InvalidArgumentException('archive_failed');
+        }
+
+        return [
+            'archive_path' => $archivePath,
+            'download_name' => $archiveRootName.'.zip',
+        ];
+    }
+
+    private function createZipWithPhpExtension(string $sourceAbsolutePath, string $archivePath, string $archiveRootName): void
+    {
         $zip = new ZipArchive();
         $openResult = $zip->open($archivePath, ZipArchive::CREATE | ZipArchive::OVERWRITE);
 
@@ -259,11 +281,82 @@ class ProjectFilesystemService
             @unlink($archivePath);
             throw new InvalidArgumentException('archive_failed');
         }
+    }
 
-        return [
-            'archive_path' => $archivePath,
-            'download_name' => $archiveRootName.'.zip',
+    private function createZipWithSystemTool(string $sourceAbsolutePath, string $archivePath): bool
+    {
+        return PHP_OS_FAMILY === 'Windows'
+            ? $this->createZipWithPowerShell($sourceAbsolutePath, $archivePath)
+            : $this->createZipWithZipBinary($sourceAbsolutePath, $archivePath);
+    }
+
+    private function createZipWithPowerShell(string $sourceAbsolutePath, string $archivePath): bool
+    {
+        $sourceLiteral = $this->powerShellLiteral($sourceAbsolutePath);
+        $archiveLiteral = $this->powerShellLiteral($archivePath);
+        $script = "Compress-Archive -Path {$sourceLiteral} -DestinationPath {$archiveLiteral} -Force";
+
+        return $this->runSystemCommand([
+            'powershell',
+            '-NoProfile',
+            '-NonInteractive',
+            '-ExecutionPolicy',
+            'Bypass',
+            '-Command',
+            $script,
+        ]) === 0;
+    }
+
+    private function createZipWithZipBinary(string $sourceAbsolutePath, string $archivePath): bool
+    {
+        $parent = dirname($sourceAbsolutePath);
+        $name = basename($sourceAbsolutePath);
+
+        if (! is_dir($parent) || $name === '') {
+            return false;
+        }
+
+        if (is_dir($sourceAbsolutePath)) {
+            return $this->runSystemCommand(['zip', '-r', '-q', $archivePath, $name], $parent) === 0;
+        }
+
+        return $this->runSystemCommand(['zip', '-q', $archivePath, $name], $parent) === 0;
+    }
+
+    /**
+     * @param list<string> $command
+     */
+    private function runSystemCommand(array $command, ?string $cwd = null): int
+    {
+        $commandLine = implode(' ', array_map('escapeshellarg', $command));
+        $descriptors = [
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
         ];
+
+        $pipes = [];
+        $process = @proc_open($commandLine, $descriptors, $pipes, $cwd);
+
+        if (! is_resource($process)) {
+            return 1;
+        }
+
+        if (isset($pipes[1]) && is_resource($pipes[1])) {
+            stream_get_contents($pipes[1]);
+            fclose($pipes[1]);
+        }
+
+        if (isset($pipes[2]) && is_resource($pipes[2])) {
+            stream_get_contents($pipes[2]);
+            fclose($pipes[2]);
+        }
+
+        return (int) proc_close($process);
+    }
+
+    private function powerShellLiteral(string $value): string
+    {
+        return "'".str_replace("'", "''", $value)."'";
     }
 
     /**

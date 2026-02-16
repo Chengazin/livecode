@@ -20,6 +20,9 @@ class ProjectParticipantController extends Controller
 
         $perPage = min((int) $request->query('per_page', 50), 200);
         $query = ProjectParticipant::query()
+            ->with([
+                'user:user_id,name,email',
+            ])
             ->whereHas('project', function ($projectQuery) use ($user) {
                 $projectQuery
                     ->where('owner_id', $user->user_id)
@@ -54,7 +57,7 @@ class ProjectParticipantController extends Controller
             return response()->json(['message' => 'Access denied.'], 403);
         }
 
-        return $participant;
+        return $participant->loadMissing('user:user_id,name,email');
     }
 
     public function store(Request $request)
@@ -76,13 +79,20 @@ class ProjectParticipantController extends Controller
             return response()->json(['message' => 'Access denied.'], 403);
         }
 
+        if ((int) $project->owner_id === (int) $data['user_id']) {
+            return response()->json(['message' => 'Owner already has access.'], 422);
+        }
+
         try {
             $participant = ProjectParticipant::query()->create($data);
         } catch (QueryException $e) {
             return response()->json(['message' => 'Participant already exists.'], 409);
         }
 
-        return response()->json($participant, 201);
+        return response()->json(
+            $participant->loadMissing('user:user_id,name,email'),
+            201
+        );
     }
 
     public function update(Request $request, int $participantId)
@@ -107,7 +117,7 @@ class ProjectParticipantController extends Controller
         $participant->fill($data);
         $participant->save();
 
-        return $participant;
+        return $participant->loadMissing('user:user_id,name,email');
     }
 
     public function destroy(Request $request, int $participantId)

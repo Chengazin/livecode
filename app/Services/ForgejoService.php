@@ -10,7 +10,7 @@ class ForgejoService
 {
     public function buildAuthorizationUrl(string $state): string
     {
-        $baseUrl = $this->baseUrl();
+        $baseUrl = $this->publicUrl();
 
         $params = [
             'client_id' => $this->clientId(),
@@ -115,6 +115,17 @@ class ForgejoService
         }
 
         return rtrim($baseUrl, '/');
+    }
+
+    private function publicUrl(): string
+    {
+        $publicUrl = (string) config('services.forgejo.public_url', '');
+
+        if ($publicUrl !== '') {
+            return rtrim($publicUrl, '/');
+        }
+
+        return $this->baseUrl();
     }
 
     private function clientId(): string

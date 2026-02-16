@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Project;
 use App\Models\ProjectInvitation;
+use App\Models\ProjectParticipant;
 use App\Services\ProjectAccessService;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
@@ -96,6 +97,60 @@ class ProjectInvitationController extends Controller
         }
 
         return response()->json($invitation, 201);
+    }
+
+    public function accept(Request $request)
+    {
+        $user = $request->user();
+
+        if (! $user) {
+            return response()->json(['message' => 'Unauthorized.'], 401);
+        }
+
+        $data = $request->validate([
+            'invite_token' => ['required', 'string', 'max:128'],
+        ]);
+
+        $invitation = ProjectInvitation::query()
+            ->where('invite_token', (string) $data['invite_token'])
+            ->first();
+
+        if (! $invitation) {
+            return response()->json(['message' => 'Invitation not found.'], 404);
+        }
+
+        if ($invitation->expires_at !== null && $invitation->expires_at->isPast()) {
+            $invitation->delete();
+
+            return response()->json(['message' => 'Invitation expired.'], 410);
+        }
+
+        $project = Project::query()->findOrFail($invitation->project_id);
+        $isOwner = (int) $project->owner_id === (int) $user->user_id;
+        $alreadyParticipant = ProjectParticipant::query()
+            ->where('project_id', $project->project_id)
+            ->where('user_id', $user->user_id)
+            ->exists();
+
+        if (! $isOwner && ! $alreadyParticipant) {
+            try {
+                ProjectParticipant::query()->create([
+                    'project_id' => $project->project_id,
+                    'user_id' => $user->user_id,
+                    'joined_at' => now(),
+                ]);
+            } catch (QueryException $e) {
+                // Ignore duplicate participant race conditions.
+            }
+        }
+
+        $invitation->delete();
+
+        return response()->json([
+            'status' => $isOwner || $alreadyParticipant ? 'already_joined' : 'joined',
+            'project_id' => $project->project_id,
+            'project_name' => $project->name,
+        ]);
     }
 
     public function update(Request $request, int $invitationId)

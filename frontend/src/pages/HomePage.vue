@@ -1,7 +1,6 @@
 <template>
   <div class="page page-grid">
     <section class="card hero-card">
-      <p class="eyebrow">{{ t("home.eyebrow") }}</p>
       <h1>{{ t("home.title") }}</h1>
       <p class="lead">
         {{ t("home.lead") }}
@@ -13,18 +12,6 @@
         <RouterLink v-if="!isAuthenticated" to="/login" class="btn btn-secondary">{{ t("home.login") }}</RouterLink>
         <RouterLink v-if="isAdmin" to="/admin" class="btn btn-ghost">{{ t("home.openAdmin") }}</RouterLink>
       </div>
-    </section>
-
-    <section class="card info-card">
-      <h2>{{ t("home.includedTitle") }}</h2>
-      <ul class="plain-list">
-        <li>{{ t("home.itemRouter") }}</li>
-        <li>{{ t("home.itemAuth") }}</li>
-        <li>{{ t("home.itemGuestEditor") }}</li>
-        <li>{{ t("home.itemProjects") }}</li>
-        <li>{{ t("home.itemBearer") }}</li>
-        <li>{{ t("home.itemCatalog") }}</li>
-      </ul>
     </section>
   </div>
 </template>

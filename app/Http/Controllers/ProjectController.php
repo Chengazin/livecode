@@ -21,7 +21,16 @@ class ProjectController extends Controller
         $perPage = min((int) $request->query('per_page', 50), 200);
 
         return Project::query()
-            ->where('owner_id', $user->user_id)
+            ->where(function ($query) use ($user) {
+                $query
+                    ->where('owner_id', $user->user_id)
+                    ->orWhereHas('participants', function ($participantQuery) use ($user) {
+                        $participantQuery->where('user_id', $user->user_id);
+                    });
+            })
+            ->with([
+                'owner:user_id,name,email',
+            ])
             ->orderByDesc('created_at')
             ->paginate($perPage);
     }

@@ -37,6 +37,8 @@ return [
 
     'forgejo' => [
         'base_url' => rtrim((string) env('FORGEJO_BASE_URL', ''), '/'),
+        'public_url' => rtrim((string) env('FORGEJO_PUBLIC_URL', (string) env('FORGEJO_BASE_URL', '')), '/'),
+        'git_base_url' => rtrim((string) env('FORGEJO_GIT_BASE_URL', (string) env('FORGEJO_BASE_URL', '')), '/'),
         'client_id' => env('FORGEJO_CLIENT_ID'),
         'client_secret' => env('FORGEJO_CLIENT_SECRET'),
         'redirect_url' => env('FORGEJO_REDIRECT_URL'),

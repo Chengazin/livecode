@@ -2,7 +2,6 @@
   <div class="page auth-page">
     <section class="card form-card">
       <h1>{{ t("login.title") }}</h1>
-      <p class="muted-text">{{ t("login.subtitle") }}</p>
 
       <form class="form-grid" @submit.prevent="handleSubmit">
         <label class="field field-row">

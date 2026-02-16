@@ -10,6 +10,10 @@ module.exports = defineConfig({
         target: backendTarget,
         changeOrigin: true,
       },
+      "^/storage": {
+        target: backendTarget,
+        changeOrigin: true,
+      },
     },
   },
 });
