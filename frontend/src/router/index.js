@@ -2,7 +2,6 @@ import { createRouter, createWebHistory } from "vue-router";
 import HomePage from "../pages/HomePage.vue";
 import LoginPage from "../pages/LoginPage.vue";
 import RegisterPage from "../pages/RegisterPage.vue";
-import ApiExplorerPage from "../pages/ApiExplorerPage.vue";
 import ForgejoCallbackPage from "../pages/ForgejoCallbackPage.vue";
 import CodeEditorPage from "../pages/CodeEditorPage.vue";
 import ProjectsPage from "../pages/ProjectsPage.vue";
@@ -11,6 +10,23 @@ import AdminPage from "../pages/AdminPage.vue";
 import AdminOverviewPage from "../pages/AdminOverviewPage.vue";
 import { clearSession, getSession, setUser } from "../services/auth";
 import { request } from "../services/api";
+
+function hasAdminRole(user) {
+  if (!user || typeof user !== "object") {
+    return false;
+  }
+
+  const adminFlag = user.is_admin;
+  if (adminFlag === true || adminFlag === 1 || adminFlag === "1") {
+    return true;
+  }
+
+  if (typeof adminFlag === "string" && adminFlag.trim().toLowerCase() === "true") {
+    return true;
+  }
+
+  return Boolean(user.admin);
+}
 
 const routes = [
   {
@@ -61,16 +77,11 @@ const routes = [
         name: "admin",
         component: AdminOverviewPage,
       },
-      {
-        path: "explorer",
-        name: "admin-explorer",
-        component: ApiExplorerPage,
-      },
     ],
   },
   {
     path: "/explorer",
-    redirect: "/admin/explorer",
+    redirect: "/admin",
   },
   {
     path: "/forgejo/callback",
@@ -112,7 +123,7 @@ router.beforeEach(async (to) => {
     return { path: "/login", query: { redirect: to.fullPath } };
   }
 
-  if (!user?.is_admin) {
+  if (!hasAdminRole(user)) {
     return { path: "/projects" };
   }
 

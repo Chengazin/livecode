@@ -15,11 +15,37 @@
         <section class="sidebar-block">
           <div class="sidebar-head">
             <h2>{{ workspaceTitle }}</h2>
-            <button class="btn btn-sm btn-ghost" type="button" @click="goToProjects">
-              {{ t("editor.backToProjects") }}
-            </button>
+            <div class="sidebar-head-actions">
+              <button class="btn btn-sm btn-ghost" type="button" @click="goToProjects">
+                {{ t("editor.backToProjects") }}
+              </button>
+              <button
+                v-if="canManageProjectSettings"
+                class="icon-btn"
+                type="button"
+                :title="t('editor.projectSettings')"
+                :aria-label="t('editor.projectSettings')"
+                @click="openProjectSettingsModal"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Z" />
+                  <path d="m4.8 13.5 1.5.4a6 6 0 0 0 .6 1.4l-.9 1.3 1.8 1.8 1.3-.9a6 6 0 0 0 1.4.6l.4 1.5h2.6l.4-1.5a6 6 0 0 0 1.4-.6l1.3.9 1.8-1.8-.9-1.3a6 6 0 0 0 .6-1.4l1.5-.4v-2.6l-1.5-.4a6 6 0 0 0-.6-1.4l.9-1.3-1.8-1.8-1.3.9a6 6 0 0 0-1.4-.6l-.4-1.5h-2.6l-.4 1.5a6 6 0 0 0-1.4.6l-1.3-.9-1.8 1.8.9 1.3a6 6 0 0 0-.6 1.4l-1.5.4v2.6Z" />
+                </svg>
+              </button>
+            </div>
           </div>
           <p class="muted-text">{{ t("editor.currentFile") }} <code>{{ currentPath }}</code></p>
+          <div class="sidebar-editor-actions">
+            <label class="field field-row">
+              <span>{{ t("common.language") }}</span>
+              <select v-model="editorLanguage">
+                <option v-for="item in languageOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
+              </select>
+            </label>
+            <button class="btn" type="button" :disabled="saving" @click="saveFile">
+              {{ saving ? t("common.saving") : isProjectRoute ? t("editor.saveToProject") : t("editor.saveLocal") }}
+            </button>
+          </div>
         </section>
 
         <section v-if="canUseProjectFs" class="sidebar-block">
@@ -30,6 +56,14 @@
             </button>
           </div>
           <div class="tree-utility-actions">
+            <button
+              class="btn btn-sm btn-ghost"
+              type="button"
+              :disabled="!currentPath"
+              @click="downloadFile"
+            >
+              {{ t("editor.downloadFile") }}
+            </button>
             <button
               class="btn btn-sm btn-secondary"
               type="button"
@@ -172,83 +206,60 @@
         </section>
 
         <section v-if="canManageProjectSettings" class="sidebar-block">
-          <details class="git-accordion project-settings-accordion">
-            <summary>{{ t("editor.projectSettings") }}</summary>
+          <div class="project-settings-block">
+            <div class="sidebar-head">
+              <h2>{{ t("editor.collaborators") }}</h2>
+            </div>
 
-            <form class="form-grid compact-form" @submit.prevent="saveProjectSettings">
+            <form class="form-grid compact-form" @submit.prevent="addCollaboratorById">
               <label class="field field-row">
-                <span>{{ t("editor.projectName") }}</span>
-                <input v-model.trim="projectSettings.name" type="text" maxlength="255" required />
+                <span>{{ t("editor.collaboratorUserId") }}</span>
+                <input
+                  v-model.trim="collaboratorUserId"
+                  type="number"
+                  min="1"
+                  step="1"
+                  inputmode="numeric"
+                  :placeholder="t('editor.collaboratorUserIdPlaceholder')"
+                />
               </label>
-
-              <label class="field field-row">
-                <span>{{ t("editor.projectVisibility") }}</span>
-                <select v-model="projectSettings.visibility">
-                  <option value="private">{{ t("editor.visibilityPrivate") }}</option>
-                  <option value="public">{{ t("editor.visibilityPublic") }}</option>
-                </select>
-              </label>
-
-              <button class="btn" type="submit" :disabled="projectSettingsBusy">
-                {{ projectSettingsBusy ? t("common.saving") : t("editor.saveProjectSettings") }}
+              <button class="btn btn-secondary" type="submit" :disabled="collaboratorBusy || !collaboratorUserId">
+                {{ collaboratorBusy ? t("common.saving") : t("editor.addCollaborator") }}
               </button>
             </form>
 
-            <div class="project-settings-block">
-              <div class="sidebar-head">
-                <h2>{{ t("editor.collaborators") }}</h2>
-              </div>
+            <div class="project-invite-actions">
+              <button class="btn btn-sm btn-secondary" type="button" :disabled="inviteBusy" @click="createInviteLink">
+                {{ inviteBusy ? t("editor.generatingInvite") : t("editor.generateInviteLink") }}
+              </button>
+              <button class="btn btn-sm btn-ghost" type="button" :disabled="!inviteLink" @click="copyInviteLink">
+                {{ t("editor.copyInviteLink") }}
+              </button>
+            </div>
+            <p v-if="inviteLink" class="muted-text project-invite-link"><code>{{ inviteLink }}</code></p>
 
-              <form class="form-grid compact-form" @submit.prevent="addCollaboratorById">
-                <label class="field field-row">
-                  <span>{{ t("editor.collaboratorUserId") }}</span>
-                  <input
-                    v-model.trim="collaboratorUserId"
-                    type="number"
-                    min="1"
-                    step="1"
-                    inputmode="numeric"
-                    :placeholder="t('editor.collaboratorUserIdPlaceholder')"
-                  />
-                </label>
-                <button class="btn btn-secondary" type="submit" :disabled="collaboratorBusy || !collaboratorUserId">
-                  {{ collaboratorBusy ? t("common.saving") : t("editor.addCollaborator") }}
-                </button>
-              </form>
+            <p v-if="participantsLoading" class="muted-text">{{ t("editor.loadingCollaborators") }}</p>
+            <p v-else-if="projectParticipants.length === 0" class="muted-text">{{ t("editor.noCollaborators") }}</p>
 
-              <div class="project-invite-actions">
-                <button class="btn btn-sm btn-secondary" type="button" :disabled="inviteBusy" @click="createInviteLink">
-                  {{ inviteBusy ? t("editor.generatingInvite") : t("editor.generateInviteLink") }}
-                </button>
-                <button class="btn btn-sm btn-ghost" type="button" :disabled="!inviteLink" @click="copyInviteLink">
-                  {{ t("editor.copyInviteLink") }}
-                </button>
-              </div>
-              <p v-if="inviteLink" class="muted-text project-invite-link"><code>{{ inviteLink }}</code></p>
-
-              <p v-if="participantsLoading" class="muted-text">{{ t("editor.loadingCollaborators") }}</p>
-              <p v-else-if="projectParticipants.length === 0" class="muted-text">{{ t("editor.noCollaborators") }}</p>
-
-              <div v-else class="collaborator-list">
-                <div v-for="participant in projectParticipants" :key="participant.participant_id" class="collaborator-row">
-                  <div class="collaborator-copy">
-                    <strong>#{{ participant.user_id }}</strong>
-                    <small v-if="participant.user?.name || participant.user?.email">
-                      {{ participant.user?.name || participant.user?.email }}
-                    </small>
-                  </div>
-                  <button
-                    class="btn btn-sm btn-ghost"
-                    type="button"
-                    :disabled="collaboratorBusy"
-                    @click="removeCollaborator(participant)"
-                  >
-                    {{ t("editor.removeCollaborator") }}
-                  </button>
+            <div v-else class="collaborator-list">
+              <div v-for="participant in projectParticipants" :key="participant.participant_id" class="collaborator-row">
+                <div class="collaborator-copy">
+                  <strong>#{{ participant.user_id }}</strong>
+                  <small v-if="participant.user?.name || participant.user?.email">
+                    {{ participant.user?.name || participant.user?.email }}
+                  </small>
                 </div>
+                <button
+                  class="btn btn-sm btn-ghost"
+                  type="button"
+                  :disabled="collaboratorBusy"
+                  @click="removeCollaborator(participant)"
+                >
+                  {{ t("editor.removeCollaborator") }}
+                </button>
               </div>
             </div>
-          </details>
+          </div>
         </section>
 
         <section v-if="canUseProjectFs" class="sidebar-block">
@@ -338,36 +349,65 @@
         @pointerdown="startPaneResize('sidebar', $event)"
       />
 
-      <section class="card editor-main">
-        <div class="editor-toolbar">
-          <div class="editor-toolbar-actions">
+      <div class="editor-main-stack">
+        <section ref="editorMainPane" class="card editor-main">
+          <p v-if="notice" class="notice-banner">{{ notice }}</p>
+          <p v-if="error" class="error-banner">{{ error }}</p>
+          <div class="editor-stage">
+            <div ref="editorHost" class="ace-editor-host" />
+          </div>
+          <div
+            v-if="canUseProjectFs"
+            class="editor-main-terminal-dock"
+            :class="{ 'is-open': terminalDockOpen }"
+            :style="terminalDockStyle"
+          >
+            <button
+              v-if="!terminalDockOpen"
+              class="editor-main-terminal-peek"
+              type="button"
+              :title="t('editor.terminalDockShow')"
+              :aria-label="t('editor.terminalDockShow')"
+              @click="openTerminalDock"
+              @pointerdown="startTerminalDockPull"
+            >
+              <span>{{ t("editor.sessionTerminal") }}</span>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 16V8" />
+                <path d="m7 13 5-5 5 5" />
+              </svg>
+            </button>
+
+            <div v-else class="editor-main-terminal">
+              <button
+                class="editor-main-terminal-resizer"
+                type="button"
+                :title="t('editor.terminalDockResize')"
+                :aria-label="t('editor.terminalDockResize')"
+                @pointerdown="startTerminalDockResize"
+              />
+              <div class="editor-main-terminal-controls">
+                <button class="btn btn-sm btn-ghost" type="button" @click="closeTerminalDock">
+                  {{ t("editor.terminalDockHide") }}
+                </button>
+              </div>
+              <ProjectTerminalPanel :project-id="selectedProjectId" :embedded="true" />
+            </div>
+          </div>
+          <div v-if="!showSidebar" class="editor-main-standalone-actions">
             <label class="field-inline">
               <span>{{ t("common.language") }}</span>
               <select v-model="editorLanguage">
                 <option v-for="item in languageOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
               </select>
             </label>
-
-            <label class="field-inline">
-              <span>{{ t("common.theme") }}</span>
-              <select v-model="editorTheme">
-                <option v-for="item in themeOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
-              </select>
-            </label>
-
             <button class="btn btn-secondary" type="button" @click="downloadFile">{{ t("editor.downloadFile") }}</button>
             <button class="btn" type="button" :disabled="saving" @click="saveFile">
               {{ saving ? t("common.saving") : isProjectRoute ? t("editor.saveToProject") : t("editor.saveLocal") }}
             </button>
           </div>
-        </div>
-
-        <p v-if="notice" class="notice-banner">{{ notice }}</p>
-        <p v-if="error" class="error-banner">{{ error }}</p>
-        <div class="editor-stage">
-          <div ref="editorHost" class="ace-editor-host" />
-        </div>
-      </section>
+        </section>
+      </div>
 
       <button
         v-if="canResizeChatPane"
@@ -394,18 +434,47 @@
         </div>
 
         <form class="chat-form" @submit.prevent="sendChatMessage">
-          <input
-            v-model.trim="chatDraft"
-            type="text"
-            maxlength="1000"
-            :placeholder="t('editor.chatPlaceholder')"
-          />
-          <button class="btn btn-sm btn-secondary" type="submit" :disabled="chatSending || !chatDraft">
-            {{ chatSending ? t("common.saving") : t("editor.chatSend") }}
-          </button>
+          <div class="chat-input-shell">
+            <input
+              v-model.trim="chatDraft"
+              type="text"
+              maxlength="1000"
+              :placeholder="t('editor.chatPlaceholder')"
+            />
+            <button
+              class="chat-send-btn"
+              type="submit"
+              :title="t('editor.chatSend')"
+              :aria-label="t('editor.chatSend')"
+              :disabled="chatSending || !chatDraft"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 12h13" />
+                <path d="m12 5 7 7-7 7" />
+              </svg>
+            </button>
+          </div>
         </form>
       </section>
     </div>
+
+    <ProjectSettingsModal
+      :open="showProjectSettingsModal && canManageProjectSettings"
+      :project="projectMeta"
+      :saving="projectSettingsBusy"
+      :can-delete="false"
+      @close="closeProjectSettingsModal"
+      @save="saveProjectSettings"
+    >
+      <template #extra-fields>
+        <label class="field field-row">
+          <span>{{ t("common.theme") }}</span>
+          <select v-model="editorTheme">
+            <option v-for="item in themeOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
+          </select>
+        </label>
+      </template>
+    </ProjectSettingsModal>
   </div>
 </template>
 
@@ -442,6 +511,8 @@ import {
   joinProjectRealtimeChannel,
   leaveProjectRealtimeChannel,
 } from "../services/realtime";
+import ProjectSettingsModal from "../components/ProjectSettingsModal.vue";
+import ProjectTerminalPanel from "../components/ProjectTerminalPanel.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -452,10 +523,25 @@ const FORGEJO_RETURN_KEY = "livecode.forgejo.return_path";
 const LAYOUT_KEY = "livecode.editor.layout";
 const SIDEBAR_MIN_WIDTH = 220;
 const SIDEBAR_MAX_WIDTH = 640;
-const CHAT_MIN_WIDTH = 260;
+const CHAT_MIN_WIDTH = 140;
 const CHAT_MAX_WIDTH = 760;
 const MAIN_MIN_WIDTH = 460;
 const SPLITTER_WIDTH = 18;
+const LAYOUT_RATIO_SIDEBAR = 30;
+const LAYOUT_RATIO_MAIN = 50;
+const LAYOUT_RATIO_CHAT = 10;
+const TERMINAL_DOCK_MIN_HEIGHT = 160;
+const TERMINAL_DOCK_MAX_HEIGHT = 520;
+const TERMINAL_DOCK_DEFAULT_HEIGHT = 280;
+const TERMINAL_DOCK_ABSOLUTE_MIN_HEIGHT = 120;
+const TERMINAL_DOCK_EDITOR_STAGE_MIN_HEIGHT = 180;
+const TERMINAL_DOCK_RESERVED_CHROME_HEIGHT = 26;
+const EDITOR_SYNC_FALLBACK_POLL_INTERVAL_MS = 2000;
+const REALTIME_SUBSCRIBE_GRACE_MS = 3000;
+const EDITOR_SYNC_DEBOUNCE_MS = 16;
+const EDITOR_SYNC_RETRY_LOCK_MS = 80;
+const EDITOR_SYNC_RETRY_DEFAULT_MS = 160;
+const CHAT_SYNC_FALLBACK_POLL_INTERVAL_MS = 2500;
 
 const session = ref(getSession());
 const isAuthenticated = computed(() => Boolean(session.value.accessToken));
@@ -482,6 +568,7 @@ const themeOptions = [
 
 const editorHost = ref(null);
 const editorLayoutHost = ref(null);
+const editorMainPane = ref(null);
 const editorSidebarPane = ref(null);
 const editorChatPane = ref(null);
 let editor = null;
@@ -490,10 +577,13 @@ let syncingEditor = false;
 const editorLanguage = ref("javascript");
 const editorTheme = ref("github");
 const viewportWidth = ref(typeof window !== "undefined" ? window.innerWidth : 1600);
-const sidebarWidth = ref(360);
-const chatWidth = ref(340);
+const sidebarWidth = ref(420);
+const chatWidth = ref(160);
 const sidebarResized = ref(false);
 const chatResized = ref(false);
+const terminalDockOpen = ref(true);
+const terminalDockHeight = ref(TERMINAL_DOCK_DEFAULT_HEIGHT);
+const terminalDockResized = ref(false);
 const activeResizePane = ref("");
 
 const guest = reactive({
@@ -535,11 +625,8 @@ const forgejoMode = ref("create");
 const forgejoRepoName = ref("");
 const forgejoRepoUrl = ref("");
 const forgejoMessage = ref("");
-const projectSettings = reactive({
-  name: "",
-  visibility: "private",
-});
 const projectSettingsBusy = ref(false);
+const showProjectSettingsModal = ref(false);
 const projectParticipants = ref([]);
 const participantsLoading = ref(false);
 const collaboratorBusy = ref(false);
@@ -574,10 +661,18 @@ let autosaveDebounceTimerId = null;
 let reconnectTimerId = null;
 let treeRefreshTimerId = null;
 let editorSyncRetryTimerId = null;
+let editorSyncFallbackPollTimerId = null;
+let realtimeSubscribeWatchTimerId = null;
+let chatFallbackPollTimerId = null;
+let participantsRefreshTimerId = null;
 let applyingRemoteEditorSync = false;
 let activeRealtimeProjectId = "";
 let editorResizeFrameId = null;
 let paneResizeState = null;
+let terminalDockResizeState = null;
+let lastPresenceSignature = "";
+let lastPresenceSentAtMs = 0;
+let realtimeChannelSubscribed = false;
 
 const notice = ref("");
 const error = ref("");
@@ -598,15 +693,24 @@ const canResizeSidebarPane = computed(() => {
 const editorLayoutStyle = computed(() => {
   const style = {};
 
-  if (showSidebar.value && sidebarResized.value) {
+  if (showSidebar.value) {
     style["--editor-sidebar-width"] = `${Math.round(sidebarWidth.value)}px`;
   }
 
-  if (canUseProjectFs.value && chatResized.value) {
+  if (canUseProjectFs.value) {
     style["--editor-chat-width"] = `${Math.round(chatWidth.value)}px`;
   }
 
   return style;
+});
+const terminalDockStyle = computed(() => {
+  if (!canUseProjectFs.value || !terminalDockOpen.value) {
+    return {};
+  }
+
+  return {
+    "--editor-terminal-height": `${Math.round(terminalDockHeight.value)}px`,
+  };
 });
 const currentUserId = computed(() => Number(session.value?.user?.user_id || 0));
 const isProjectOwner = computed(() => {
@@ -750,6 +854,160 @@ function clampNumber(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+function parseCssSize(value) {
+  const numeric = Number.parseFloat(String(value || ""));
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function resolveTerminalDockBounds() {
+  if (typeof window === "undefined") {
+    return {
+      minHeight: TERMINAL_DOCK_MIN_HEIGHT,
+      maxHeight: TERMINAL_DOCK_MAX_HEIGHT,
+    };
+  }
+
+  const viewportMax = Math.min(
+    TERMINAL_DOCK_MAX_HEIGHT,
+    Math.max(TERMINAL_DOCK_ABSOLUTE_MIN_HEIGHT, window.innerHeight - 240),
+  );
+
+  let maxHeight = viewportMax;
+  const pane = editorMainPane.value;
+
+  if (pane) {
+    const paneRect = pane.getBoundingClientRect();
+    const paneHeight = Number(paneRect?.height || 0);
+
+    if (paneHeight > 0) {
+      const paneStyles = window.getComputedStyle(pane);
+      const paddingTop = parseCssSize(paneStyles.paddingTop);
+      const paddingBottom = parseCssSize(paneStyles.paddingBottom);
+      const rowGap = parseCssSize(paneStyles.rowGap || paneStyles.gap);
+      const contentHeight = paneHeight - paddingTop - paddingBottom;
+      const paneMax = contentHeight - TERMINAL_DOCK_EDITOR_STAGE_MIN_HEIGHT - rowGap - TERMINAL_DOCK_RESERVED_CHROME_HEIGHT;
+
+      if (Number.isFinite(paneMax)) {
+        maxHeight = Math.min(maxHeight, paneMax);
+      }
+    }
+  }
+
+  maxHeight = Math.max(TERMINAL_DOCK_ABSOLUTE_MIN_HEIGHT, maxHeight);
+  const minHeight = Math.min(TERMINAL_DOCK_MIN_HEIGHT, maxHeight);
+  return { minHeight, maxHeight };
+}
+
+function normalizeTerminalDockHeight() {
+  const { minHeight, maxHeight } = resolveTerminalDockBounds();
+  terminalDockHeight.value = clampNumber(
+    terminalDockHeight.value,
+    minHeight,
+    maxHeight,
+  );
+}
+
+function openTerminalDock() {
+  if (terminalDockOpen.value) {
+    return;
+  }
+
+  terminalDockOpen.value = true;
+  normalizeTerminalDockHeight();
+  persistEditorLayoutPrefs();
+  scheduleEditorResize();
+}
+
+function closeTerminalDock() {
+  if (!terminalDockOpen.value) {
+    return;
+  }
+
+  stopTerminalDockResize();
+  terminalDockOpen.value = false;
+  persistEditorLayoutPrefs();
+  scheduleEditorResize();
+}
+
+function beginTerminalDockResize(startY, startHeight) {
+  terminalDockResizeState = {
+    startY,
+    startHeight,
+  };
+
+  if (typeof window !== "undefined") {
+    window.addEventListener("pointermove", onTerminalDockResizeMove);
+    window.addEventListener("pointerup", stopTerminalDockResize);
+    window.addEventListener("pointercancel", stopTerminalDockResize);
+    document.body.classList.add("is-resizing-terminal-dock");
+  }
+}
+
+function stopTerminalDockResize() {
+  if (typeof window !== "undefined") {
+    window.removeEventListener("pointermove", onTerminalDockResizeMove);
+    window.removeEventListener("pointerup", stopTerminalDockResize);
+    window.removeEventListener("pointercancel", stopTerminalDockResize);
+    document.body.classList.remove("is-resizing-terminal-dock");
+  }
+
+  if (!terminalDockResizeState) {
+    return;
+  }
+
+  terminalDockResizeState = null;
+  persistEditorLayoutPrefs();
+  scheduleEditorResize();
+}
+
+function onTerminalDockResizeMove(event) {
+  if (!terminalDockResizeState || !terminalDockOpen.value) {
+    return;
+  }
+
+  const { minHeight, maxHeight } = resolveTerminalDockBounds();
+  const delta = terminalDockResizeState.startY - event.clientY;
+  const nextHeight = clampNumber(
+    terminalDockResizeState.startHeight + delta,
+    minHeight,
+    maxHeight,
+  );
+
+  terminalDockHeight.value = nextHeight;
+  terminalDockResized.value = true;
+  scheduleEditorResize();
+}
+
+function startTerminalDockResize(event) {
+  if (event.button !== 0 || !canUseProjectFs.value || !terminalDockOpen.value) {
+    return;
+  }
+
+  normalizeTerminalDockHeight();
+  beginTerminalDockResize(event.clientY, terminalDockHeight.value);
+  event.preventDefault();
+}
+
+function startTerminalDockPull(event) {
+  if (event.button !== 0 || !canUseProjectFs.value) {
+    return;
+  }
+
+  const fallbackHeight = terminalDockResized.value ? terminalDockHeight.value : TERMINAL_DOCK_DEFAULT_HEIGHT;
+  const { minHeight, maxHeight } = resolveTerminalDockBounds();
+  terminalDockOpen.value = true;
+  const startHeight = clampNumber(
+    fallbackHeight,
+    minHeight,
+    maxHeight,
+  );
+  terminalDockHeight.value = startHeight;
+  terminalDockResized.value = true;
+  beginTerminalDockResize(event.clientY, startHeight);
+  scheduleEditorResize();
+  event.preventDefault();
+}
+
 function measurePaneWidth(paneRef, fallback) {
   const pane = paneRef?.value;
   if (!pane) {
@@ -769,7 +1027,13 @@ function measureSidebarWidth() {
     return sidebarWidth.value;
   }
 
-  return measurePaneWidth(editorSidebarPane, canUseProjectFs.value ? 240 : 360);
+  const layoutWidth = resolveLayoutWidth();
+  if (layoutWidth > 0) {
+    const { sidebarTarget } = resolvePaneRatioTargets(layoutWidth);
+    return measurePaneWidth(editorSidebarPane, sidebarTarget);
+  }
+
+  return measurePaneWidth(editorSidebarPane, 420);
 }
 
 function measureChatWidth() {
@@ -777,7 +1041,13 @@ function measureChatWidth() {
     return chatWidth.value;
   }
 
-  return measurePaneWidth(editorChatPane, 340);
+  const layoutWidth = resolveLayoutWidth();
+  if (layoutWidth > 0) {
+    const { chatTarget } = resolvePaneRatioTargets(layoutWidth);
+    return measurePaneWidth(editorChatPane, chatTarget);
+  }
+
+  return measurePaneWidth(editorChatPane, 160);
 }
 
 function resolveLayoutWidth() {
@@ -809,40 +1079,100 @@ function resolveChatMax(layoutWidth, currentSidebarWidth) {
   return Math.max(CHAT_MIN_WIDTH, bounded);
 }
 
+function resolvePaneRatioTargets(layoutWidth) {
+  const hasChatPane = canUseProjectFs.value && viewportWidth.value > 1260;
+  const ratioSum = hasChatPane
+    ? (LAYOUT_RATIO_SIDEBAR + LAYOUT_RATIO_MAIN + LAYOUT_RATIO_CHAT)
+    : (LAYOUT_RATIO_SIDEBAR + LAYOUT_RATIO_MAIN);
+  const splitters = hasChatPane ? SPLITTER_WIDTH * 2 : SPLITTER_WIDTH;
+  const usableWidth = Math.max(0, layoutWidth - splitters);
+
+  const sidebarTarget = usableWidth > 0
+    ? (usableWidth * LAYOUT_RATIO_SIDEBAR) / ratioSum
+    : SIDEBAR_MIN_WIDTH;
+  const chatTarget = hasChatPane && usableWidth > 0
+    ? (usableWidth * LAYOUT_RATIO_CHAT) / ratioSum
+    : CHAT_MIN_WIDTH;
+
+  return {
+    sidebarTarget,
+    chatTarget,
+    hasChatPane,
+  };
+}
+
+function enforceMainWidthWithChat(layoutWidth, sidebarValue, chatValue) {
+  const availableMain = layoutWidth - (SPLITTER_WIDTH * 2) - sidebarValue - chatValue;
+  if (availableMain >= MAIN_MIN_WIDTH) {
+    return {
+      sidebar: sidebarValue,
+      chat: chatValue,
+    };
+  }
+
+  let deficit = MAIN_MIN_WIDTH - availableMain;
+  let nextSidebar = sidebarValue;
+  let nextChat = chatValue;
+
+  const sidebarSpare = Math.max(0, nextSidebar - SIDEBAR_MIN_WIDTH);
+  const chatSpare = Math.max(0, nextChat - CHAT_MIN_WIDTH);
+  const totalSpare = sidebarSpare + chatSpare;
+
+  if (totalSpare <= 0) {
+    return {
+      sidebar: nextSidebar,
+      chat: nextChat,
+    };
+  }
+
+  const reduceSidebar = Math.min(sidebarSpare, deficit * (sidebarSpare / totalSpare));
+  nextSidebar -= reduceSidebar;
+  deficit -= reduceSidebar;
+
+  if (deficit > 0) {
+    const reduceChat = Math.min(chatSpare, deficit);
+    nextChat -= reduceChat;
+  }
+
+  return {
+    sidebar: nextSidebar,
+    chat: nextChat,
+  };
+}
+
 function normalizeEditorLayoutWidths() {
   const width = resolveLayoutWidth();
   if (!width || viewportWidth.value <= 1040 || !showSidebar.value) {
     return;
   }
 
-  const measuredSidebar = measureSidebarWidth();
-
   if (canUseProjectFs.value && viewportWidth.value > 1260) {
-    const measuredChat = measureChatWidth();
-    const safeSidebar = clampNumber(measuredSidebar, SIDEBAR_MIN_WIDTH, resolveSidebarMax(width, measuredChat));
-    const safeChat = clampNumber(measuredChat, CHAT_MIN_WIDTH, resolveChatMax(width, safeSidebar));
+    const { sidebarTarget, chatTarget } = resolvePaneRatioTargets(width);
+    const preferredSidebar = sidebarResized.value ? measureSidebarWidth() : sidebarTarget;
+    const preferredChat = chatResized.value ? measureChatWidth() : chatTarget;
+    let safeSidebar = clampNumber(preferredSidebar, SIDEBAR_MIN_WIDTH, resolveSidebarMax(width, preferredChat));
+    let safeChat = clampNumber(preferredChat, CHAT_MIN_WIDTH, resolveChatMax(width, safeSidebar));
+    const adjusted = enforceMainWidthWithChat(width, safeSidebar, safeChat);
 
-    if (sidebarResized.value) {
-      sidebarWidth.value = safeSidebar;
-    }
+    safeSidebar = clampNumber(adjusted.sidebar, SIDEBAR_MIN_WIDTH, resolveSidebarMax(width, adjusted.chat));
+    safeChat = clampNumber(adjusted.chat, CHAT_MIN_WIDTH, resolveChatMax(width, safeSidebar));
 
-    if (chatResized.value) {
-      chatWidth.value = safeChat;
-    }
+    sidebarWidth.value = safeSidebar;
+    chatWidth.value = safeChat;
 
     return;
   }
 
   if (canResizeSidebarPane.value) {
+    const { sidebarTarget } = resolvePaneRatioTargets(width);
+    const preferredSidebar = sidebarResized.value ? measureSidebarWidth() : sidebarTarget;
     const safeSidebar = clampNumber(
-      measuredSidebar,
+      preferredSidebar,
       SIDEBAR_MIN_WIDTH,
       Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, width - SPLITTER_WIDTH - MAIN_MIN_WIDTH)),
     );
 
-    if (sidebarResized.value) {
-      sidebarWidth.value = safeSidebar;
-    }
+    sidebarWidth.value = safeSidebar;
   }
 }
 
@@ -870,6 +1200,8 @@ function persistEditorLayoutPrefs() {
     const payload = {
       sidebar_width: sidebarResized.value ? Math.round(sidebarWidth.value) : null,
       chat_width: chatResized.value ? Math.round(chatWidth.value) : null,
+      terminal_dock_open: terminalDockOpen.value,
+      terminal_dock_height: terminalDockResized.value ? Math.round(terminalDockHeight.value) : null,
     };
 
     window.localStorage.setItem(LAYOUT_KEY, JSON.stringify(payload));
@@ -892,6 +1224,7 @@ function restoreEditorLayoutPrefs() {
     const payload = JSON.parse(raw);
     const persistedSidebar = Number(payload?.sidebar_width);
     const persistedChat = Number(payload?.chat_width);
+    const persistedTerminalHeight = Number(payload?.terminal_dock_height);
 
     if (Number.isFinite(persistedSidebar) && persistedSidebar > 0) {
       sidebarWidth.value = persistedSidebar;
@@ -902,6 +1235,17 @@ function restoreEditorLayoutPrefs() {
       chatWidth.value = persistedChat;
       chatResized.value = true;
     }
+
+    if (typeof payload?.terminal_dock_open === "boolean") {
+      terminalDockOpen.value = payload.terminal_dock_open;
+    }
+
+    if (Number.isFinite(persistedTerminalHeight) && persistedTerminalHeight > 0) {
+      terminalDockHeight.value = persistedTerminalHeight;
+      terminalDockResized.value = true;
+    }
+
+    normalizeTerminalDockHeight();
   } catch (_error) {
     // Ignore malformed localStorage data.
   }
@@ -1006,6 +1350,7 @@ function onViewportResize() {
 
   viewportWidth.value = window.innerWidth;
   normalizeEditorLayoutWidths();
+  normalizeTerminalDockHeight();
   scheduleEditorResize();
 }
 
@@ -1355,8 +1700,6 @@ async function loadProjectName() {
     if (selectedProjectId.value === requestedId) {
       projectName.value = name;
       projectMeta.value = payload;
-      projectSettings.name = name;
-      projectSettings.visibility = payload?.is_public ? "public" : "private";
 
       if (canManageProjectSettings.value) {
         void loadProjectParticipants();
@@ -1377,6 +1720,18 @@ async function goToProjects() {
   await router.push("/projects");
 }
 
+function openProjectSettingsModal() {
+  if (!canManageProjectSettings.value) {
+    return;
+  }
+
+  showProjectSettingsModal.value = true;
+}
+
+function closeProjectSettingsModal() {
+  showProjectSettingsModal.value = false;
+}
+
 function resetProjectTreeState() {
   tree.value = [];
   expanded.value = [];
@@ -1387,8 +1742,7 @@ function resetProjectTreeState() {
 }
 
 function resetProjectSettingsState() {
-  projectSettings.name = "";
-  projectSettings.visibility = "private";
+  showProjectSettingsModal.value = false;
   projectParticipants.value = [];
   collaboratorUserId.value = "";
   inviteLink.value = "";
@@ -1434,6 +1788,28 @@ function clearRealtimeTimers() {
     window.clearTimeout(editorSyncRetryTimerId);
     editorSyncRetryTimerId = null;
   }
+
+  if (editorSyncFallbackPollTimerId !== null) {
+    window.clearInterval(editorSyncFallbackPollTimerId);
+    editorSyncFallbackPollTimerId = null;
+  }
+
+  if (realtimeSubscribeWatchTimerId !== null) {
+    window.clearTimeout(realtimeSubscribeWatchTimerId);
+    realtimeSubscribeWatchTimerId = null;
+  }
+
+  if (chatFallbackPollTimerId !== null) {
+    window.clearInterval(chatFallbackPollTimerId);
+    chatFallbackPollTimerId = null;
+  }
+
+  if (participantsRefreshTimerId !== null) {
+    window.clearTimeout(participantsRefreshTimerId);
+    participantsRefreshTimerId = null;
+  }
+
+  realtimeChannelSubscribed = false;
 }
 
 function resetEditorSyncState() {
@@ -1464,6 +1840,8 @@ function resetRealtimeState() {
   lastChatId.value = 0;
   liveSyncBusy.value = false;
   realtimeBusy.value = false;
+  lastPresenceSignature = "";
+  lastPresenceSentAtMs = 0;
   resetEditorSyncState();
   lastKnownFileUpdatedAt.value = "";
   disconnectRealtimeClient();
@@ -1575,8 +1953,25 @@ function buildPresencePayload() {
   return payload;
 }
 
-async function syncRealtimePresence() {
+function serializePresencePayload(payload) {
+  return JSON.stringify({
+    path: String(payload?.path || ""),
+    cursor_row: payload?.cursor_row ?? null,
+    cursor_column: payload?.cursor_column ?? null,
+  });
+}
+
+async function syncRealtimePresence(options = {}) {
   if (!canUseProjectFs.value || !selectedProjectId.value || realtimeBusy.value) {
+    return;
+  }
+
+  const force = Boolean(options?.force);
+  const payload = buildPresencePayload();
+  const nowMs = Date.now();
+  const signature = serializePresencePayload(payload);
+
+  if (!force && signature === lastPresenceSignature && (nowMs - lastPresenceSentAtMs) < 2500) {
     return;
   }
 
@@ -1587,11 +1982,13 @@ async function syncRealtimePresence() {
       method: "POST",
       path: `/projects/${selectedProjectId.value}/realtime/heartbeat`,
       auth: true,
-      body: buildPresencePayload(),
+      body: payload,
     });
 
     const peers = Array.isArray(response.data?.peers) ? response.data.peers : [];
     setRealtimePeers(peers);
+    lastPresenceSignature = signature;
+    lastPresenceSentAtMs = Date.now();
   } catch (_error) {
     // Best effort: next heartbeat retries automatically.
   } finally {
@@ -1599,7 +1996,7 @@ async function syncRealtimePresence() {
   }
 }
 
-function schedulePresenceSync(delay = 300) {
+function schedulePresenceSync(delay = 500) {
   if (typeof window === "undefined" || !canUseProjectFs.value) {
     return;
   }
@@ -1614,10 +2011,13 @@ function schedulePresenceSync(delay = 300) {
   }, delay);
 }
 
-async function loadChatMessages() {
+async function loadChatMessages(options = {}) {
   if (!canUseProjectFs.value || !selectedProjectId.value) {
     return;
   }
+
+  const forceReload = Boolean(options?.forceReload);
+  const afterId = forceReload ? 0 : Math.max(0, Number(lastChatId.value || 0));
 
   try {
     const response = await request({
@@ -1625,7 +2025,7 @@ async function loadChatMessages() {
       path: `/projects/${selectedProjectId.value}/realtime/chat`,
       auth: true,
       query: {
-        after_id: 0,
+        after_id: afterId,
         limit: 150,
       },
     });
@@ -1635,9 +2035,18 @@ async function loadChatMessages() {
       .map((item) => normalizeChatMessage(item))
       .filter((item) => item.id > 0);
 
-    chatMessages.value = incoming.slice(-150);
+    if (afterId > 0) {
+      incoming.forEach((message) => {
+        appendChatMessage(message);
+      });
+    } else {
+      chatMessages.value = incoming.slice(-150);
+    }
+
     const latest = Number(response.data?.latest_id || 0);
-    lastChatId.value = Number.isFinite(latest) ? Math.max(0, latest) : 0;
+    if (Number.isFinite(latest)) {
+      lastChatId.value = Math.max(lastChatId.value, Math.max(0, latest));
+    }
   } catch (_error) {
     // Best effort bootstrap. New messages still come via websocket channel.
   }
@@ -2052,7 +2461,7 @@ function scheduleEditorSync() {
   editorSyncDebounceTimerId = window.setTimeout(() => {
     editorSyncDebounceTimerId = null;
     void flushEditorSync();
-  }, 40);
+  }, EDITOR_SYNC_DEBOUNCE_MS);
 }
 
 async function flushEditorSync() {
@@ -2147,12 +2556,16 @@ async function flushEditorSync() {
 
     editorSyncBusy.value = false;
     if (typeof window !== "undefined" && editorSyncRetryTimerId === null) {
+      const retryDelay = status === 423
+        ? EDITOR_SYNC_RETRY_LOCK_MS
+        : EDITOR_SYNC_RETRY_DEFAULT_MS;
+
       editorSyncRetryTimerId = window.setTimeout(() => {
         editorSyncRetryTimerId = null;
         if (editorSyncPendingOps.length > 0) {
           void flushEditorSync();
         }
-      }, 250);
+      }, retryDelay);
     }
   } finally {
     if (editorSyncBusy.value && !editorSyncInflightOp) {
@@ -2207,8 +2620,12 @@ async function persistLiveSyncChanges() {
   }
 }
 
-function handleRealtimeFilesystemEvent(payload) {
+function handleRealtimeFilesystemEvent(eventName, payload) {
   if (Number(payload?.user_id || 0) === currentUserId.value) {
+    return;
+  }
+
+  if (eventName === "file_saved") {
     return;
   }
 
@@ -2220,6 +2637,21 @@ function handleRealtimeFilesystemEvent(payload) {
     treeRefreshTimerId = null;
     void loadTree();
   }, 400);
+}
+
+function scheduleProjectParticipantsRefresh(delay = 250) {
+  if (typeof window === "undefined" || !canManageProjectSettings.value) {
+    return;
+  }
+
+  if (participantsRefreshTimerId !== null) {
+    window.clearTimeout(participantsRefreshTimerId);
+  }
+
+  participantsRefreshTimerId = window.setTimeout(() => {
+    participantsRefreshTimerId = null;
+    void loadProjectParticipants();
+  }, delay);
 }
 
 function scheduleRealtimeReconnect() {
@@ -2236,6 +2668,45 @@ function scheduleRealtimeReconnect() {
   }, 1500);
 }
 
+function startEditorSyncFallbackPolling() {
+  if (typeof window === "undefined" || editorSyncFallbackPollTimerId !== null || !canUseProjectFs.value) {
+    return;
+  }
+
+  editorSyncFallbackPollTimerId = window.setInterval(() => {
+    void pollEditorRealtimeUpdates();
+  }, EDITOR_SYNC_FALLBACK_POLL_INTERVAL_MS);
+
+  void pollEditorRealtimeUpdates();
+}
+
+function stopEditorSyncFallbackPolling() {
+  if (editorSyncFallbackPollTimerId === null) {
+    return;
+  }
+
+  window.clearInterval(editorSyncFallbackPollTimerId);
+  editorSyncFallbackPollTimerId = null;
+}
+
+function scheduleRealtimeSubscribeWatch() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  if (realtimeSubscribeWatchTimerId !== null) {
+    window.clearTimeout(realtimeSubscribeWatchTimerId);
+  }
+
+  realtimeSubscribeWatchTimerId = window.setTimeout(() => {
+    realtimeSubscribeWatchTimerId = null;
+
+    if (!realtimeChannelSubscribed) {
+      startEditorSyncFallbackPolling();
+    }
+  }, REALTIME_SUBSCRIBE_GRACE_MS);
+}
+
 async function startRealtimeSession() {
   if (typeof window === "undefined" || !canUseProjectFs.value || !selectedProjectId.value) {
     return;
@@ -2247,13 +2718,24 @@ async function startRealtimeSession() {
   const channel = joinProjectRealtimeChannel(selectedProjectId.value, token);
 
   if (!channel) {
+    startEditorSyncFallbackPolling();
     scheduleRealtimeReconnect();
     return;
   }
 
   activeRealtimeProjectId = selectedProjectId.value;
+  realtimeChannelSubscribed = false;
+  scheduleRealtimeSubscribeWatch();
 
   channel.subscribed(() => {
+    realtimeChannelSubscribed = true;
+    stopEditorSyncFallbackPolling();
+
+    if (realtimeSubscribeWatchTimerId !== null) {
+      window.clearTimeout(realtimeSubscribeWatchTimerId);
+      realtimeSubscribeWatchTimerId = null;
+    }
+
     if (reconnectTimerId !== null) {
       window.clearTimeout(reconnectTimerId);
       reconnectTimerId = null;
@@ -2261,6 +2743,8 @@ async function startRealtimeSession() {
   });
 
   channel.error(() => {
+    realtimeChannelSubscribed = false;
+    startEditorSyncFallbackPolling();
     scheduleRealtimeReconnect();
   });
 
@@ -2272,29 +2756,111 @@ async function startRealtimeSession() {
     appendChatMessage(payload?.message || payload);
   });
 
+  channel.listen(".realtime.project.participants.updated", () => {
+    scheduleProjectParticipantsRefresh();
+  });
+
   channel.listen(".realtime.editor.operation", (payload) => {
     applyRemoteEditorOperation(payload?.operation || payload);
   });
 
-  channel.listen(".file_created", handleRealtimeFilesystemEvent);
-  channel.listen(".folder_created", handleRealtimeFilesystemEvent);
-  channel.listen(".path_deleted", handleRealtimeFilesystemEvent);
-  channel.listen(".path_moved", handleRealtimeFilesystemEvent);
-  channel.listen(".file_saved", handleRealtimeFilesystemEvent);
+  channel.listen(".realtime.terminal.session.updated", (payload) => {
+    if (typeof window === "undefined") {
+      return;
+    }
 
-  await syncRealtimePresence();
+    window.dispatchEvent(new CustomEvent("project-terminal-session-updated", {
+      detail: {
+        projectId: Number(selectedProjectId.value || 0),
+        session: payload?.session || payload,
+      },
+    }));
+  });
+
+  channel.listen(".file_created", (payload) => {
+    handleRealtimeFilesystemEvent("file_created", payload);
+  });
+  channel.listen(".folder_created", (payload) => {
+    handleRealtimeFilesystemEvent("folder_created", payload);
+  });
+  channel.listen(".path_deleted", (payload) => {
+    handleRealtimeFilesystemEvent("path_deleted", payload);
+  });
+  channel.listen(".path_moved", (payload) => {
+    handleRealtimeFilesystemEvent("path_moved", payload);
+  });
+  channel.listen(".file_saved", (payload) => {
+    handleRealtimeFilesystemEvent("file_saved", payload);
+  });
+
+  await syncRealtimePresence({ force: true });
   await loadChatMessages();
   if (liveSyncEnabled.value && isProjectMode.value && activeProjectPath.value) {
     await bootstrapEditorRealtimeState(currentText.value);
   }
 
+  if (chatFallbackPollTimerId !== null) {
+    window.clearInterval(chatFallbackPollTimerId);
+  }
+  chatFallbackPollTimerId = window.setInterval(() => {
+    void loadChatMessages();
+  }, CHAT_SYNC_FALLBACK_POLL_INTERVAL_MS);
+
   presenceIntervalTimerId = window.setInterval(() => {
-    void syncRealtimePresence();
+    void syncRealtimePresence({ force: true });
   }, 10000);
 
   presencePruneTimerId = window.setInterval(() => {
     pruneRealtimePeers();
   }, 3000);
+}
+
+async function pollEditorRealtimeUpdates() {
+  if (
+    !canSyncEditorRealtime()
+    || !selectedProjectId.value
+    || !activeProjectPath.value
+    || editorStateBootstrapping
+    || applyingRemoteEditorSync
+  ) {
+    return;
+  }
+
+  if (editorSyncBusy.value || editorSyncInflightOp || editorSyncPendingOps.length > 0) {
+    return;
+  }
+
+  try {
+    const response = await request({
+      method: "POST",
+      path: `/projects/${selectedProjectId.value}/realtime/editor-state`,
+      auth: true,
+      body: {
+        path: activeProjectPath.value,
+      },
+    });
+
+    const revision = Number(response.data?.revision || 0);
+    if (!Number.isFinite(revision) || revision < 0) {
+      return;
+    }
+
+    const remoteContent = typeof response.data?.content === "string"
+      ? response.data.content
+      : null;
+    const hasNewRevision = revision > editorDocRevision;
+
+    if (hasNewRevision) {
+      editorDocRevision = revision;
+    }
+
+    if (remoteContent !== null && hasNewRevision && remoteContent !== currentText.value) {
+      setEditorContentFromRealtime(remoteContent, true);
+      dirty.value = true;
+    }
+  } catch (_pollError) {
+    // Best-effort fallback when websocket channel is unavailable.
+  }
 }
 
 async function sendChatMessage() {
@@ -2355,12 +2921,14 @@ async function loadProjectParticipants() {
   }
 }
 
-async function saveProjectSettings() {
+async function saveProjectSettings(payload) {
   if (!canManageProjectSettings.value || !selectedProjectId.value || projectSettingsBusy.value) {
     return;
   }
 
-  const nextName = String(projectSettings.name || "").trim();
+  const nextName = String(payload?.name || "").trim();
+  const nextDescriptionText = String(payload?.description || "").trim();
+  const nextVisibility = payload?.visibility === "public" ? "public" : "private";
   if (!nextName) {
     error.value = t("editor.projectNameRequired");
     return;
@@ -2376,16 +2944,16 @@ async function saveProjectSettings() {
       auth: true,
       body: {
         name: nextName,
-        is_public: projectSettings.visibility === "public",
+        description: nextDescriptionText !== "" ? nextDescriptionText : null,
+        is_public: nextVisibility === "public",
       },
     });
 
     const payload = response.data || {};
     projectMeta.value = payload;
     projectName.value = typeof payload?.name === "string" ? payload.name.trim() : nextName;
-    projectSettings.name = projectName.value;
-    projectSettings.visibility = payload?.is_public ? "public" : "private";
     notice.value = t("editor.projectSettingsSaved");
+    closeProjectSettingsModal();
   } catch (settingsError) {
     error.value = readError(settingsError);
   } finally {
@@ -3209,7 +3777,7 @@ function initEditor() {
   });
 
   editor.selection.on("changeCursor", () => {
-    schedulePresenceSync(200);
+    schedulePresenceSync(500);
   });
 }
 
@@ -3322,6 +3890,12 @@ watch(
       stopPaneResize();
     }
 
+    if (!canUseProjectFs.value) {
+      stopTerminalDockResize();
+    } else {
+      normalizeTerminalDockHeight();
+    }
+
     if (!canResizeSidebarPane.value && activeResizePane.value === "sidebar") {
       stopPaneResize();
     }
@@ -3353,6 +3927,7 @@ onMounted(() => {
   if (typeof window !== "undefined") {
     viewportWidth.value = window.innerWidth;
     window.addEventListener("resize", onViewportResize);
+    normalizeTerminalDockHeight();
   }
 
   window.addEventListener("auth-changed", onAuthChanged);
@@ -3366,6 +3941,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   stopPaneResize();
+  stopTerminalDockResize();
 
   if (typeof window !== "undefined") {
     window.removeEventListener("resize", onViewportResize);

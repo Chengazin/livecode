@@ -1,6 +1,7 @@
 <template>
   <div class="page page-grid">
     <section class="card hero-card">
+      <p class="eyebrow">{{ t("home.badge") }}</p>
       <h1>{{ t("home.title") }}</h1>
       <p class="lead">
         {{ t("home.lead") }}
@@ -10,9 +11,17 @@
         <RouterLink to="/editor" class="btn btn-secondary">{{ t("home.openEditor") }}</RouterLink>
         <RouterLink v-if="!isAuthenticated" to="/register" class="btn btn-secondary">{{ t("home.createAccount") }}</RouterLink>
         <RouterLink v-if="!isAuthenticated" to="/login" class="btn btn-secondary">{{ t("home.login") }}</RouterLink>
-        <RouterLink v-if="isAdmin" to="/admin" class="btn btn-ghost">{{ t("home.openAdmin") }}</RouterLink>
       </div>
     </section>
+
+    <aside class="card info-card">
+      <h2>{{ t("home.whatsInsideTitle") }}</h2>
+      <ul class="plain-list">
+        <li>{{ t("home.featureRealtime") }}</li>
+        <li>{{ t("home.featureTerminal") }}</li>
+        <li>{{ t("home.featureGit") }}</li>
+      </ul>
+    </aside>
   </div>
 </template>
 
@@ -25,7 +34,6 @@ const { t } = useI18n();
 const session = ref(getSession());
 
 const isAuthenticated = computed(() => Boolean(session.value.accessToken));
-const isAdmin = computed(() => Boolean(session.value.accessToken && session.value.user?.is_admin));
 
 function handleAuthChanged() {
   session.value = getSession();

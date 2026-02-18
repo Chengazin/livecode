@@ -89,8 +89,27 @@ const session = ref(getSession());
 const loadingProfile = ref(false);
 const statusMessage = ref("");
 
+function hasAdminRole(user) {
+  if (!user || typeof user !== "object") {
+    return false;
+  }
+
+  const adminFlag = user.is_admin;
+  if (adminFlag === true || adminFlag === 1 || adminFlag === "1") {
+    return true;
+  }
+
+  if (typeof adminFlag === "string" && adminFlag.trim().toLowerCase() === "true") {
+    return true;
+  }
+
+  return Boolean(user.admin);
+}
+
 const isAuthenticated = computed(() => Boolean(session.value.accessToken));
-const isAdmin = computed(() => Boolean(session.value.accessToken && session.value.user?.is_admin));
+const isAdmin = computed(() => {
+  return Boolean(session.value.accessToken) && hasAdminRole(session.value.user);
+});
 const userLabel = computed(() => {
   return session.value.user?.name || session.value.user?.email || t("nav.signedIn");
 });
@@ -115,7 +134,7 @@ function isRouteActive(path) {
 }
 
 async function refreshProfile() {
-  if (!session.value.accessToken) {
+  if (!session.value.accessToken || loadingProfile.value) {
     return;
   }
 
@@ -144,15 +163,15 @@ async function refreshProfile() {
 
 function handleAuthChanged() {
   session.value = getSession();
+
+  if (session.value.accessToken) {
+    void refreshProfile();
+  }
 }
 
 onMounted(() => {
   window.addEventListener("auth-changed", handleAuthChanged);
   handleAuthChanged();
-
-  if (session.value.accessToken) {
-    void refreshProfile();
-  }
 });
 
 onUnmounted(() => {

@@ -2,12 +2,14 @@
 
 namespace Tests\Feature;
 
+use App\Events\ProjectRealtimeEvent;
 use App\Models\Project;
 use App\Models\ProjectInvitation;
 use App\Models\ProjectParticipant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
 
@@ -17,6 +19,8 @@ class ProjectCollaborationTest extends TestCase
 
     public function test_accept_invitation_adds_participant_and_consumes_token(): void
     {
+        Event::fake();
+
         $owner = $this->createUser('owner-invite@example.com');
         $invitee = $this->createUser('invitee@example.com');
         $project = $this->createProject($owner, 'Invite Demo');
@@ -47,6 +51,42 @@ class ProjectCollaborationTest extends TestCase
         $this->assertDatabaseMissing('project_invitations', [
             'invitation_id' => $invitation->invitation_id,
         ]);
+
+        Event::assertDispatched(ProjectRealtimeEvent::class, function (ProjectRealtimeEvent $event) use ($project, $invitee): bool {
+            return $event->projectId === (int) $project->project_id
+                && $event->name === 'realtime.project.participants.updated'
+                && ($event->payload['action'] ?? '') === 'participant_joined'
+                && (int) ($event->payload['participant_user_id'] ?? 0) === (int) $invitee->user_id;
+        });
+    }
+
+    public function test_collaborator_cannot_view_invitation_token_via_show_endpoint(): void
+    {
+        $owner = $this->createUser('owner-invite-show@example.com');
+        $collaborator = $this->createUser('collaborator-invite-show@example.com');
+        $project = $this->createProject($owner, 'Invite show');
+
+        ProjectParticipant::query()->create([
+            'project_id' => $project->project_id,
+            'user_id' => $collaborator->user_id,
+            'joined_at' => now(),
+        ]);
+
+        $invitation = ProjectInvitation::query()->create([
+            'project_id' => $project->project_id,
+            'inviter_user_id' => $owner->user_id,
+            'invite_token' => 'invite-token-show-001',
+            'expires_at' => now()->addDay(),
+        ]);
+
+        $token = $collaborator->createToken('test')->plainTextToken;
+
+        $this->withToken($token)
+            ->getJson('/api/project-invitations/'.$invitation->invitation_id)
+            ->assertStatus(403)
+            ->assertJson([
+                'message' => 'Access denied.',
+            ]);
     }
 
     public function test_projects_index_returns_owned_and_collaborator_projects(): void

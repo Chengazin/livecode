@@ -44,12 +44,13 @@ class AuthController extends Controller
 
         $user = User::query()->where('email', $data['email'])->first();
 
-        if (! $user || ! Hash::check($data['password'], $user->password_hash)) {
+        if (
+            ! $user
+            || ! Hash::check($data['password'], $user->password_hash)
+            || $user->status !== 'active'
+        ) {
+            // Deliberately return the same error for auth failures to reduce account enumeration.
             return response()->json(['message' => 'Invalid credentials.'], 401);
-        }
-
-        if ($user->status !== 'active') {
-            return response()->json(['message' => 'User is not active.'], 403);
         }
 
         $tokenName = $data['device_name'] ?? 'api';

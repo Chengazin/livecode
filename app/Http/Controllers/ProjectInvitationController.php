@@ -2,10 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\ProjectRealtimeEvent;
 use App\Models\Project;
 use App\Models\ProjectInvitation;
 use App\Models\ProjectParticipant;
-use App\Services\ProjectAccessService;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -24,11 +24,7 @@ class ProjectInvitationController extends Controller
         $perPage = min((int) $request->query('per_page', 50), 200);
         $query = ProjectInvitation::query()
             ->whereHas('project', function ($projectQuery) use ($user) {
-                $projectQuery
-                    ->where('owner_id', $user->user_id)
-                    ->orWhereHas('participants', function ($participantQuery) use ($user) {
-                        $participantQuery->where('user_id', $user->user_id);
-                    });
+                $projectQuery->where('owner_id', $user->user_id);
             });
 
         if ($request->filled('project_id')) {
@@ -44,8 +40,7 @@ class ProjectInvitationController extends Controller
 
     public function show(
         Request $request,
-        int $invitationId,
-        ProjectAccessService $access
+        int $invitationId
     )
     {
         $user = $request->user();
@@ -57,7 +52,7 @@ class ProjectInvitationController extends Controller
         $invitation = ProjectInvitation::query()->findOrFail($invitationId);
         $project = Project::query()->findOrFail($invitation->project_id);
 
-        if (! $access->userHasAccess($project, $user)) {
+        if (! $this->isOwner($project, (int) $user->user_id)) {
             return response()->json(['message' => 'Access denied.'], 403);
         }
 
@@ -131,6 +126,7 @@ class ProjectInvitationController extends Controller
             ->where('project_id', $project->project_id)
             ->where('user_id', $user->user_id)
             ->exists();
+        $participantJoined = false;
 
         if (! $isOwner && ! $alreadyParticipant) {
             try {
@@ -139,12 +135,24 @@ class ProjectInvitationController extends Controller
                     'user_id' => $user->user_id,
                     'joined_at' => now(),
                 ]);
+                $participantJoined = true;
             } catch (QueryException $e) {
                 // Ignore duplicate participant race conditions.
             }
         }
 
         $invitation->delete();
+
+        if ($participantJoined) {
+            $this->broadcastParticipantsUpdated(
+                $project,
+                (int) $user->user_id,
+                'participant_joined',
+                [
+                    'participant_user_id' => (int) $user->user_id,
+                ]
+            );
+        }
 
         return response()->json([
             'status' => $isOwner || $alreadyParticipant ? 'already_joined' : 'joined',
@@ -207,6 +215,28 @@ class ProjectInvitationController extends Controller
     private function isOwner(Project $project, int $userId): bool
     {
         return (int) $project->owner_id === $userId;
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     */
+    private function broadcastParticipantsUpdated(Project $project, int $actorUserId, string $action, array $payload = []): void
+    {
+        try {
+            event(new ProjectRealtimeEvent(
+                (int) $project->project_id,
+                $actorUserId,
+                'realtime.project.participants.updated',
+                array_merge(
+                    [
+                        'action' => $action,
+                    ],
+                    $payload
+                )
+            ));
+        } catch (\Throwable) {
+            // Broadcast failures should not block invitation acceptance.
+        }
     }
 
     private function generateInviteToken(): string

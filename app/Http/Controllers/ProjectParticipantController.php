@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\ProjectRealtimeEvent;
 use App\Models\Project;
 use App\Models\ProjectParticipant;
 use App\Services\ProjectAccessService;
@@ -89,6 +90,16 @@ class ProjectParticipantController extends Controller
             return response()->json(['message' => 'Participant already exists.'], 409);
         }
 
+        $this->broadcastParticipantsUpdated(
+            $project,
+            (int) $user->user_id,
+            'participant_added',
+            [
+                'participant_id' => (int) $participant->participant_id,
+                'participant_user_id' => (int) $participant->user_id,
+            ]
+        );
+
         return response()->json(
             $participant->loadMissing('user:user_id,name,email'),
             201
@@ -137,7 +148,19 @@ class ProjectParticipantController extends Controller
             return response()->json(['message' => 'Access denied.'], 403);
         }
 
+        $removedParticipantId = (int) $participant->participant_id;
+        $removedUserId = (int) $participant->user_id;
         $participant->delete();
+
+        $this->broadcastParticipantsUpdated(
+            $project,
+            (int) $user->user_id,
+            'participant_removed',
+            [
+                'participant_id' => $removedParticipantId,
+                'participant_user_id' => $removedUserId,
+            ]
+        );
 
         return response()->noContent();
     }
@@ -145,5 +168,27 @@ class ProjectParticipantController extends Controller
     private function isOwner(Project $project, int $userId): bool
     {
         return (int) $project->owner_id === $userId;
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     */
+    private function broadcastParticipantsUpdated(Project $project, int $actorUserId, string $action, array $payload = []): void
+    {
+        try {
+            event(new ProjectRealtimeEvent(
+                (int) $project->project_id,
+                $actorUserId,
+                'realtime.project.participants.updated',
+                array_merge(
+                    [
+                        'action' => $action,
+                    ],
+                    $payload
+                )
+            ));
+        } catch (\Throwable) {
+            // Presence updates are best-effort and must not break participant writes.
+        }
     }
 }

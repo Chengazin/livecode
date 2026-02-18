@@ -14,13 +14,42 @@ class UserController extends Controller
     public function index(Request $request)
     {
         $perPage = min((int) $request->query('per_page', 50), 200);
+        $search = trim((string) $request->query('search', ''));
+        $status = trim((string) $request->query('status', ''));
+        $isAdmin = $request->query('is_admin', null);
+        $likeOperator = config('database.default') === 'pgsql' ? 'ilike' : 'like';
 
-        return User::query()->paginate($perPage);
+        $query = User::query()->with(['admin:admin_id,user_id'])->orderByDesc('created_at');
+
+        if ($search !== '') {
+            $query->where(function ($builder) use ($search, $likeOperator) {
+                $builder
+                    ->where('name', $likeOperator, '%'.$search.'%')
+                    ->orWhere('email', $likeOperator, '%'.$search.'%');
+
+                if (ctype_digit($search)) {
+                    $builder->orWhere('user_id', (int) $search);
+                }
+            });
+        }
+
+        if ($status !== '') {
+            $query->where('status', $status);
+        }
+
+        if ($isAdmin !== null && $isAdmin !== '') {
+            $flag = filter_var($isAdmin, FILTER_VALIDATE_BOOL);
+            $query->{$flag ? 'whereHas' : 'whereDoesntHave'}('admin');
+        }
+
+        return $query->paginate($perPage);
     }
 
     public function show(int $userId)
     {
-        return User::query()->findOrFail($userId);
+        return User::query()
+            ->with(['admin:admin_id,user_id'])
+            ->findOrFail($userId);
     }
 
     public function store(Request $request)
@@ -29,8 +58,8 @@ class UserController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'email', 'max:255', 'unique:users,email'],
             'password' => ['required', 'string', 'min:8', 'max:255'],
-            'status' => ['sometimes', 'string', 'max:20'],
-            'language' => ['sometimes', 'string', 'max:3'],
+            'status' => ['sometimes', 'string', Rule::in(['active', 'blocked'])],
+            'language' => ['sometimes', 'string', Rule::in(['rus', 'eng'])],
             'last_seen' => ['nullable', 'date'],
         ]);
 
@@ -43,12 +72,13 @@ class UserController extends Controller
             'last_seen' => $data['last_seen'] ?? null,
         ]);
 
-        return response()->json($user, 201);
+        return response()->json($user->load('admin:admin_id,user_id'), 201);
     }
 
     public function update(Request $request, int $userId)
     {
         $user = User::query()->findOrFail($userId);
+        $isAdminUser = $user->admin()->exists();
 
         $data = $request->validate([
             'name' => ['sometimes', 'string', 'max:255'],
@@ -60,10 +90,16 @@ class UserController extends Controller
                 Rule::unique('users', 'email')->ignore($user->user_id, 'user_id'),
             ],
             'password' => ['sometimes', 'string', 'min:8', 'max:255'],
-            'status' => ['sometimes', 'string', 'max:20'],
-            'language' => ['sometimes', 'string', 'max:3'],
+            'status' => ['sometimes', 'string', Rule::in(['active', 'blocked'])],
+            'language' => ['sometimes', 'string', Rule::in(['rus', 'eng'])],
             'last_seen' => ['nullable', 'date'],
         ]);
+
+        if ($isAdminUser && array_key_exists('status', $data) && $data['status'] !== $user->status) {
+            return response()->json([
+                'message' => 'Cannot change status for admin users.',
+            ], 403);
+        }
 
         if (array_key_exists('password', $data)) {
             $data['password_hash'] = Hash::make($data['password']);
@@ -73,12 +109,17 @@ class UserController extends Controller
         $user->fill($data);
         $user->save();
 
-        return $user;
+        return $user->load('admin:admin_id,user_id');
     }
 
     public function destroy(int $userId)
     {
         $user = User::query()->findOrFail($userId);
+        if ($user->admin()->exists()) {
+            return response()->json([
+                'message' => 'Cannot delete admin users.',
+            ], 403);
+        }
 
         $projectPaths = Project::query()
             ->where('owner_id', $user->user_id)

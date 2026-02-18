@@ -5,7 +5,6 @@ namespace App\Http\Controllers;
 use App\Events\ProjectRealtimeEvent;
 use App\Models\Project;
 use App\Services\ProjectAccessService;
-use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -20,7 +19,6 @@ class ProjectRealtimeController extends Controller
     private const EDITOR_MAX_INSERT_LENGTH = 524288;
     private const EDITOR_MAX_HISTORY = 500;
     private const EDITOR_LOCK_TTL_SECONDS = 5;
-    private const EDITOR_LOCK_WAIT_SECONDS = 2;
 
     public function heartbeat(
         Request $request,
@@ -399,6 +397,19 @@ class ProjectRealtimeController extends Controller
             ? $this->truncateEditorContent((string) ($data['seed_content'] ?? ''))
             : null;
 
+        if (! $reset && $seedContent === null) {
+            $snapshot = $this->readEditorStateSnapshot($project->project_id, $path);
+
+            if ($snapshot !== null) {
+                return response()->json([
+                    'status' => 'ok',
+                    'path' => $path,
+                    'revision' => (int) ($snapshot['revision'] ?? 0),
+                    'content' => (string) ($snapshot['content'] ?? ''),
+                ]);
+            }
+        }
+
         return $this->withEditorLock($project->project_id, $path, function () use (
             $project,
             $path,
@@ -627,6 +638,24 @@ class ProjectRealtimeController extends Controller
     /**
      * @return array<string, mixed>|null
      */
+    private function readEditorStateSnapshot(int $projectId, string $path): ?array
+    {
+        $state = Cache::get($this->editorDocKey($projectId, $path));
+        if (! is_array($state)) {
+            return null;
+        }
+
+        return [
+            'path' => $path,
+            'revision' => max(0, (int) ($state['revision'] ?? 0)),
+            'content' => $this->truncateEditorContent((string) ($state['content'] ?? '')),
+            'updated_at' => (string) ($state['updated_at'] ?? now()->toISOString()),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
     private function readEditorState(int $projectId, string $path): ?array
     {
         $state = Cache::get($this->editorDocKey($projectId, $path));
@@ -658,20 +687,30 @@ class ProjectRealtimeController extends Controller
             $this->editorDocLockKey($projectId, $path),
             self::EDITOR_LOCK_TTL_SECONDS
         );
+        $acquired = false;
 
         try {
-            $response = $lock->block(self::EDITOR_LOCK_WAIT_SECONDS, $callback);
-        } catch (LockTimeoutException) {
-            return response()->json([
-                'message' => 'Editor sync is busy, please retry.',
-            ], 423);
+            $acquired = (bool) $lock->get();
+            if (! $acquired) {
+                return response()->json([
+                    'message' => 'Editor sync is busy, please retry.',
+                ], 423);
+            }
+
+            return $callback();
         } catch (\Throwable) {
             return response()->json([
                 'message' => 'Realtime editor sync failed.',
             ], 500);
+        } finally {
+            if ($acquired) {
+                try {
+                    $lock->release();
+                } catch (\Throwable) {
+                    // Ignore release failures; lock TTL bounds stale locks.
+                }
+            }
         }
-
-        return $response;
     }
 
     private function editorDocKey(int $projectId, string $path): string

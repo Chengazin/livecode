@@ -19,13 +19,18 @@ class ForgejoSecurityTest extends TestCase
 
     public function test_connect_callback_requires_authenticated_user(): void
     {
+        $this->withoutMiddleware(\Illuminate\Cookie\Middleware\EncryptCookies::class);
+
         Cache::put('forgejo_oauth_state:test-state', [
             'mode' => 'connect',
             'user_id' => 999,
             'created_at' => now()->toISOString(),
+            'binding' => 'test-binding',
         ], now()->addMinutes(10));
 
-        $response = $this->getJson('/api/forgejo/oauth/callback?code=fake&state=test-state');
+        $response = $this
+            ->withHeader('X-Forgejo-OAuth-Binding', 'test-binding')
+            ->getJson('/api/forgejo/oauth/callback?code=fake&state=test-state');
 
         $response
             ->assertStatus(401)
@@ -36,6 +41,8 @@ class ForgejoSecurityTest extends TestCase
 
     public function test_connect_callback_rejects_state_user_mismatch(): void
     {
+        $this->withoutMiddleware(\Illuminate\Cookie\Middleware\EncryptCookies::class);
+
         $stateOwner = $this->createUser('state-owner@example.com');
         $anotherUser = $this->createUser('other@example.com');
 
@@ -43,17 +50,37 @@ class ForgejoSecurityTest extends TestCase
             'mode' => 'connect',
             'user_id' => $stateOwner->user_id,
             'created_at' => now()->toISOString(),
+            'binding' => 'test-binding',
         ], now()->addMinutes(10));
 
         $token = $anotherUser->createToken('test')->plainTextToken;
 
         $response = $this->withToken($token)
+            ->withHeader('X-Forgejo-OAuth-Binding', 'test-binding')
             ->getJson('/api/forgejo/oauth/callback?code=fake&state=test-state');
 
         $response
             ->assertStatus(403)
             ->assertJson([
                 'message' => 'State user mismatch.',
+            ]);
+    }
+
+    public function test_callback_rejects_request_without_state_binding_cookie(): void
+    {
+        Cache::put('forgejo_oauth_state:test-state', [
+            'mode' => 'login',
+            'user_id' => null,
+            'created_at' => now()->toISOString(),
+            'binding' => 'required-cookie-binding',
+        ], now()->addMinutes(10));
+
+        $response = $this->getJson('/api/forgejo/oauth/callback?code=fake&state=test-state');
+
+        $response
+            ->assertStatus(422)
+            ->assertJson([
+                'message' => 'Invalid state.',
             ]);
     }
 
@@ -109,6 +136,8 @@ class ForgejoSecurityTest extends TestCase
 
     public function test_login_callback_does_not_auto_link_existing_email_by_default(): void
     {
+        $this->withoutMiddleware(\Illuminate\Cookie\Middleware\EncryptCookies::class);
+
         config([
             'services.forgejo.base_url' => 'https://forgejo.example.test',
             'services.forgejo.client_id' => 'client-id',
@@ -123,6 +152,7 @@ class ForgejoSecurityTest extends TestCase
             'mode' => 'login',
             'user_id' => null,
             'created_at' => now()->toISOString(),
+            'binding' => 'test-binding',
         ], now()->addMinutes(10));
 
         Http::fake([
@@ -144,7 +174,9 @@ class ForgejoSecurityTest extends TestCase
             ),
         ]);
 
-        $response = $this->getJson('/api/forgejo/oauth/callback?code=fake&state=test-state');
+        $response = $this
+            ->withHeader('X-Forgejo-OAuth-Binding', 'test-binding')
+            ->getJson('/api/forgejo/oauth/callback?code=fake&state=test-state');
 
         $response
             ->assertStatus(409)

@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 
 use App\Models\Admin;
 use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
 
 class AdminController extends Controller
 {
@@ -26,40 +25,22 @@ class AdminController extends Controller
 
     public function store(Request $request)
     {
-        $data = $request->validate([
-            'user_id' => ['required', 'integer', 'exists:users,user_id', 'unique:admins,user_id'],
-            'created_at' => ['nullable', 'date'],
-        ]);
-
-        $admin = Admin::query()->create($data);
-
-        return response()->json($admin, 201);
+        return response()->json([
+            'message' => 'Admin role changes are disabled by business rules.',
+        ], 403);
     }
 
     public function update(Request $request, int $adminId)
     {
-        $admin = Admin::query()->findOrFail($adminId);
-
-        $data = $request->validate([
-            'user_id' => [
-                'sometimes',
-                'integer',
-                'exists:users,user_id',
-                Rule::unique('admins', 'user_id')->ignore($admin->admin_id, 'admin_id'),
-            ],
-        ]);
-
-        $admin->fill($data);
-        $admin->save();
-
-        return $admin;
+        return response()->json([
+            'message' => 'Admin role changes are disabled by business rules.',
+        ], 403);
     }
 
     public function destroy(int $adminId)
     {
-        $admin = Admin::query()->findOrFail($adminId);
-        $admin->delete();
-
-        return response()->noContent();
+        return response()->json([
+            'message' => 'Admin role changes are disabled by business rules.',
+        ], 403);
     }
 }
