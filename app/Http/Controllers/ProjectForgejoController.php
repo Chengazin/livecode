@@ -8,6 +8,7 @@ use App\Services\ForgejoService;
 use App\Services\ProjectAccessService;
 use App\Services\ProjectGitService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use RuntimeException;
@@ -33,7 +34,7 @@ class ProjectForgejoController extends Controller
             return response()->json(['message' => 'Access denied.'], 403);
         }
 
-        if ((int) $project->owner_id !== (int) $user->user_id) {
+        if (! $access->canManageRepository($project, $user)) {
             return response()->json(['message' => 'Only project owner can manage Forgejo settings.'], 403);
         }
 
@@ -136,7 +137,7 @@ class ProjectForgejoController extends Controller
             return response()->json(['message' => 'Access denied.'], 403);
         }
 
-        if ((int) $project->owner_id !== (int) $user->user_id) {
+        if (! $access->canPushDirect($project, $user)) {
             return response()->json(['message' => 'Only project owner can push to Forgejo.'], 403);
         }
 
@@ -263,7 +264,7 @@ class ProjectForgejoController extends Controller
             return response()->json(['message' => 'Access denied.'], 403);
         }
 
-        if ((int) $project->owner_id !== (int) $user->user_id) {
+        if (! $access->canSyncRepository($project, $user)) {
             return response()->json(['message' => 'Only project owner can sync with Forgejo.'], 403);
         }
 
@@ -344,6 +345,168 @@ class ProjectForgejoController extends Controller
             'status' => $this->isPullNoopOutput($syncOutput) ? 'up_to_date' : 'synced',
             'output' => $syncOutput,
         ]);
+    }
+
+    public function pullRequest(
+        Request $request,
+        int $projectId,
+        ProjectAccessService $access,
+        ProjectGitService $git,
+        ForgejoService $forgejo
+    ) {
+        $user = $request->user();
+
+        if (! $user) {
+            return response()->json(['message' => 'Unauthorized.'], 401);
+        }
+
+        $project = Project::query()->findOrFail($projectId);
+
+        if (! $access->userHasAccess($project, $user)) {
+            return response()->json(['message' => 'Access denied.'], 403);
+        }
+
+        if (! $access->canCreatePullRequest($project, $user)) {
+            return response()->json(['message' => 'Insufficient permissions to create pull requests.'], 403);
+        }
+
+        if (
+            ! $project->git_enabled
+            || (! $project->forgejo_repo_clone_url && ! $project->forgejo_repo_full_name)
+        ) {
+            return response()->json(['message' => 'Forgejo repository is not configured.'], 409);
+        }
+
+        if (! $user->forgejo_access_token) {
+            return response()->json(['message' => 'Forgejo is not connected.'], 409);
+        }
+
+        $data = $request->validate([
+            'title' => ['nullable', 'string', 'max:255'],
+            'body' => ['nullable', 'string', 'max:5000'],
+            'message' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $repoPath = Storage::disk('local')->path($project->project_path);
+        $defaultBranch = trim((string) ($project->forgejo_default_branch ?: 'main'));
+        if ($defaultBranch === '') {
+            $defaultBranch = 'main';
+        }
+
+        $git->initRepository($repoPath, $defaultBranch);
+
+        $author = [
+            'name' => $user->name,
+            'email' => $user->email,
+        ];
+
+        $commitMessage = trim((string) ($data['message'] ?? ''));
+        if ($commitMessage === '') {
+            $commitMessage = 'Pull request update '.now()->toDateTimeString();
+        }
+
+        $committed = $git->commitAll($repoPath, $commitMessage, $author, false);
+        $headBranch = $this->generatePullRequestBranchName((int) $user->user_id);
+        $refspec = 'HEAD:refs/heads/'.$headBranch;
+
+        $remoteUrls = $this->buildRepositoryCloneUrlCandidates(
+            (string) ($project->forgejo_repo_full_name ?? ''),
+            (string) ($project->forgejo_repo_clone_url ?? '')
+        );
+
+        $remoteUrls = array_values(array_filter(
+            $remoteUrls,
+            fn (string $url): bool => $url !== '' && $this->isTrustedForgejoCloneUrl($url)
+        ));
+
+        if ($remoteUrls === []) {
+            return response()->json(['message' => 'Repository clone URL does not match configured Forgejo host.'], 502);
+        }
+
+        $usedRemoteUrl = '';
+        $lastPushError = '';
+        $pushOutput = '';
+        foreach ($remoteUrls as $remoteUrl) {
+            try {
+                $pushOutput = $git->pushRefspec(
+                    $repoPath,
+                    $remoteUrl,
+                    $refspec,
+                    $user->forgejo_access_token,
+                    $author,
+                    false
+                );
+                $usedRemoteUrl = $remoteUrl;
+                break;
+            } catch (RuntimeException $e) {
+                $lastPushError = $e->getMessage();
+
+                if (! $committed && $this->isNoCommitRefspecError($lastPushError)) {
+                    return response()->json(['status' => 'nothing_to_commit']);
+                }
+
+                if ($this->isNetworkUnreachableGitError($lastPushError)) {
+                    continue;
+                }
+
+                return response()->json(['message' => $lastPushError], 502);
+            }
+        }
+
+        if ($usedRemoteUrl === '') {
+            return response()->json(['message' => $lastPushError !== '' ? $lastPushError : 'git_push_failed'], 502);
+        }
+
+        if (! $committed && $this->isPushNoopOutput($pushOutput)) {
+            return response()->json(['status' => 'nothing_to_commit']);
+        }
+
+        $repoReference = $this->resolveRepositoryOwnerAndName($project, $usedRemoteUrl);
+        if ($repoReference === null) {
+            return response()->json(['message' => 'Invalid repository response.'], 502);
+        }
+
+        $title = trim((string) ($data['title'] ?? ''));
+        if ($title === '') {
+            $title = 'Livecode changes by '.$user->name;
+        }
+
+        $body = trim((string) ($data['body'] ?? ''));
+        if ($body === '') {
+            $body = 'Created from Livecode project #'.$project->project_id.'.';
+        }
+
+        try {
+            $pullRequest = $forgejo->createPullRequest(
+                $user->forgejo_access_token,
+                $repoReference['owner'],
+                $repoReference['repo'],
+                [
+                    'title' => $title,
+                    'body' => $body,
+                    'head' => $headBranch,
+                    'base' => $defaultBranch,
+                ]
+            );
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 502);
+        }
+
+        if ($usedRemoteUrl !== (string) $project->forgejo_repo_clone_url) {
+            $project->forgejo_repo_clone_url = $usedRemoteUrl;
+        }
+
+        $project->forgejo_last_push_at = now();
+        $project->save();
+
+        return response()->json([
+            'status' => 'pull_request_created',
+            'number' => (int) ($pullRequest['number'] ?? 0) ?: null,
+            'html_url' => (string) ($pullRequest['html_url'] ?? ''),
+            'head_branch' => $headBranch,
+            'base_branch' => $defaultBranch,
+            'title' => (string) ($pullRequest['title'] ?? $title),
+        ], 201);
     }
 
     private function sanitizeRepoName(string $value): string
@@ -470,6 +633,56 @@ class ProjectForgejoController extends Controller
         $candidates = $this->buildRepositoryCloneUrlCandidates($repoFullName, $fallbackCloneUrl);
 
         return $candidates[0] ?? '';
+    }
+
+    private function generatePullRequestBranchName(int $userId): string
+    {
+        return 'livecode/u'.$userId.'/pr-'.now()->format('Ymd-His').'-'.strtolower(Str::random(6));
+    }
+
+    /**
+     * @return array{owner: string, repo: string}|null
+     */
+    private function resolveRepositoryOwnerAndName(Project $project, string $fallbackCloneUrl = ''): ?array
+    {
+        $fullName = trim((string) ($project->forgejo_repo_full_name ?? ''), " \t\n\r\0\x0B/");
+        if ($fullName !== '') {
+            if (str_ends_with(strtolower($fullName), '.git')) {
+                $fullName = substr($fullName, 0, -4);
+            }
+
+            $segments = array_values(array_filter(explode('/', $fullName)));
+            if (count($segments) === 2) {
+                $owner = trim((string) $segments[0]);
+                $repo = trim((string) $segments[1]);
+
+                if ($owner !== '' && $repo !== '') {
+                    return [
+                        'owner' => $owner,
+                        'repo' => $repo,
+                    ];
+                }
+            }
+        }
+
+        $candidates = [
+            (string) ($project->forgejo_repo_clone_url ?? ''),
+            $fallbackCloneUrl,
+        ];
+
+        foreach ($candidates as $candidate) {
+            $reference = $this->parseRepositoryReference((string) $candidate);
+            if ($reference === null) {
+                continue;
+            }
+
+            return [
+                'owner' => $reference['owner'],
+                'repo' => $reference['repo'],
+            ];
+        }
+
+        return null;
     }
 
     private function isNoCommitRefspecError(string $message): bool

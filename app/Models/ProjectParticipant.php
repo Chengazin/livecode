@@ -10,6 +10,12 @@ class ProjectParticipant extends Model
 {
     use HasFactory;
 
+    public const ROLE_VIEWER = 'viewer';
+
+    public const ROLE_DEVELOPER = 'developer';
+
+    public const ROLE_MAINTAINER = 'maintainer';
+
     protected $primaryKey = 'participant_id';
 
     public $timestamps = false;
@@ -17,12 +23,35 @@ class ProjectParticipant extends Model
     protected $fillable = [
         'project_id',
         'user_id',
+        'role',
         'joined_at',
     ];
 
     protected $casts = [
         'joined_at' => 'datetime',
     ];
+
+    /**
+     * @return list<string>
+     */
+    public static function roles(): array
+    {
+        return [
+            self::ROLE_VIEWER,
+            self::ROLE_DEVELOPER,
+            self::ROLE_MAINTAINER,
+        ];
+    }
+
+    public static function normalizeRole(?string $role): string
+    {
+        $value = strtolower(trim((string) $role));
+        if (! in_array($value, self::roles(), true)) {
+            return self::ROLE_DEVELOPER;
+        }
+
+        return $value;
+    }
 
     public function project(): BelongsTo
     {

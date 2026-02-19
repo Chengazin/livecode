@@ -106,6 +106,26 @@ class ForgejoService
         return (array) $response->json();
     }
 
+    /**
+     * @param array<string, mixed> $payload
+     * @return array<string, mixed>
+     */
+    public function createPullRequest(string $token, string $owner, string $repo, array $payload): array
+    {
+        $response = Http::withToken($token, 'token')
+            ->acceptJson()
+            ->post(
+                $this->baseUrl().'/api/v1/repos/'.rawurlencode($owner).'/'.rawurlencode($repo).'/pulls',
+                $payload
+            );
+
+        if (! $response->successful()) {
+            throw new RuntimeException($this->buildErrorMessage('forgejo_pull_request_create_failed', $response));
+        }
+
+        return (array) $response->json();
+    }
+
     private function baseUrl(): string
     {
         $baseUrl = (string) config('services.forgejo.base_url', '');

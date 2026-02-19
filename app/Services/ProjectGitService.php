@@ -35,6 +35,71 @@ class ProjectGitService
         $this->run([$git, 'remote', 'add', $name, $url], $path);
     }
 
+    public function isRepository(string $path): bool
+    {
+        return is_dir($path.DIRECTORY_SEPARATOR.'.git');
+    }
+
+    /**
+     * @return list<array{
+     *   hash: string,
+     *   short_hash: string,
+     *   parents: list<string>,
+     *   author_name: string,
+     *   author_email: string,
+     *   authored_at: string,
+     *   subject: string,
+     *   decorations: string
+     * }>
+     */
+    public function listCommits(string $path, int $limit = 100, ?string $ref = null): array
+    {
+        $limit = max(1, min($limit, 500));
+        $git = $this->gitBinary();
+
+        $args = [
+            $git,
+            'log',
+            '--date=iso-strict',
+            '--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%ae%x1f%ad%x1f%s%x1f%D',
+            '-n',
+            (string) $limit,
+        ];
+
+        $normalizedRef = trim((string) $ref);
+        if ($normalizedRef !== '') {
+            $args[] = $normalizedRef;
+        }
+
+        $output = trim($this->run($args, $path));
+        if ($output === '') {
+            return [];
+        }
+
+        $commits = [];
+        $lines = preg_split('/\R/u', $output, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        foreach ($lines as $line) {
+            $parts = explode("\x1f", (string) $line);
+            if (count($parts) < 8) {
+                continue;
+            }
+
+            $parents = trim((string) $parts[2]);
+            $commits[] = [
+                'hash' => (string) $parts[0],
+                'short_hash' => (string) $parts[1],
+                'parents' => $parents !== '' ? preg_split('/\s+/', $parents, -1, PREG_SPLIT_NO_EMPTY) ?: [] : [],
+                'author_name' => (string) $parts[3],
+                'author_email' => (string) $parts[4],
+                'authored_at' => (string) $parts[5],
+                'subject' => (string) $parts[6],
+                'decorations' => (string) $parts[7],
+            ];
+        }
+
+        return $commits;
+    }
+
     public function hasChanges(string $path): bool
     {
         $status = trim($this->run([$this->gitBinary(), 'status', '--porcelain'], $path));
@@ -72,6 +137,20 @@ class ProjectGitService
      */
     public function push(string $path, string $remoteUrl, string $branch, string $token, array $author): string
     {
+        return $this->pushRefspec($path, $remoteUrl, $branch, $token, $author, true);
+    }
+
+    /**
+     * @param array{name:string,email:string} $author
+     */
+    public function pushRefspec(
+        string $path,
+        string $remoteUrl,
+        string $refspec,
+        string $token,
+        array $author,
+        bool $setUpstream = false
+    ): string {
         $authUrl = $this->buildAuthenticatedUrl($remoteUrl, $token);
         $extraEnv = $this->buildNetworkEnvForRemoteUrl($remoteUrl);
         $args = [$this->gitBinary()];
@@ -84,9 +163,11 @@ class ProjectGitService
         }
 
         $args[] = 'push';
-        $args[] = '-u';
+        if ($setUpstream) {
+            $args[] = '-u';
+        }
         $args[] = $authUrl;
-        $args[] = $branch;
+        $args[] = $refspec;
 
         return $this->run($args, $path, $author, $extraEnv);
     }

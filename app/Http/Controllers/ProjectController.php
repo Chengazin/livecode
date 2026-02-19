@@ -84,7 +84,7 @@ class ProjectController extends Controller
         return response()->json($project, 201);
     }
 
-    public function update(Request $request, int $projectId)
+    public function update(Request $request, int $projectId, ProjectAccessService $access)
     {
         $user = $request->user();
 
@@ -94,7 +94,7 @@ class ProjectController extends Controller
 
         $project = Project::query()->findOrFail($projectId);
 
-        if (! $this->isOwner($project, $user)) {
+        if (! $access->canManageSettings($project, $user)) {
             return response()->json(['message' => 'Access denied.'], 403);
         }
 

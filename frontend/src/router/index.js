@@ -5,6 +5,7 @@ import RegisterPage from "../pages/RegisterPage.vue";
 import ForgejoCallbackPage from "../pages/ForgejoCallbackPage.vue";
 import CodeEditorPage from "../pages/CodeEditorPage.vue";
 import ProjectsPage from "../pages/ProjectsPage.vue";
+import ProjectInfoPage from "../pages/ProjectInfoPage.vue";
 import ProfilePage from "../pages/ProfilePage.vue";
 import AdminPage from "../pages/AdminPage.vue";
 import AdminOverviewPage from "../pages/AdminOverviewPage.vue";
@@ -49,6 +50,12 @@ const routes = [
     path: "/projects/:projectId/editor",
     name: "project-editor",
     component: CodeEditorPage,
+    meta: { requiresAuth: true },
+  },
+  {
+    path: "/projects/:projectId/info",
+    name: "project-info",
+    component: ProjectInfoPage,
     meta: { requiresAuth: true },
   },
   {

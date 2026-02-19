@@ -93,7 +93,7 @@ class User extends Authenticatable
             'project_id',
             'user_id',
             'project_id'
-        )->withPivot(['participant_id', 'joined_at']);
+        )->withPivot(['participant_id', 'role', 'joined_at']);
     }
 
     public function invitationsSent(): HasMany

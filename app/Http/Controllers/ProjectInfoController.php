@@ -1,0 +1,540 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\Project;
+use App\Models\ProjectParticipant;
+use App\Models\ProjectSnapshot;
+use App\Services\ProjectAccessService;
+use App\Services\ProjectGitService;
+use Carbon\CarbonImmutable;
+use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Storage;
+use RuntimeException;
+
+class ProjectInfoController extends Controller
+{
+    public function show(
+        Request $request,
+        int $projectId,
+        ProjectAccessService $access,
+        ProjectGitService $git
+    ) {
+        $user = $request->user();
+
+        if (! $user) {
+            return response()->json(['message' => 'Unauthorized.'], 401);
+        }
+
+        $project = Project::query()
+            ->with([
+                'owner:user_id,name,email',
+            ])
+            ->findOrFail($projectId);
+
+        if (! $access->userHasAccess($project, $user)) {
+            return response()->json(['message' => 'Access denied.'], 403);
+        }
+
+        $periodDays = $this->resolveIntQuery($request->query('period_days'), 30, 1, 365);
+        $commitLimit = $this->resolveIntQuery($request->query('commit_limit'), 200, 1, 500);
+        $snapshotLimit = $this->resolveIntQuery($request->query('snapshot_limit'), 80, 1, 500);
+
+        $participants = ProjectParticipant::query()
+            ->where('project_id', $project->project_id)
+            ->with([
+                'user:user_id,name,email',
+            ])
+            ->orderByDesc('joined_at')
+            ->orderByDesc('participant_id')
+            ->get();
+        $knownContributors = $this->buildKnownContributorMaps($project, $participants);
+
+        $defaultBranch = trim((string) ($project->forgejo_default_branch ?: 'main'));
+        if ($defaultBranch === '') {
+            $defaultBranch = 'main';
+        }
+
+        $commits = [];
+        $gitError = '';
+        $gitAvailable = false;
+        $repoPath = Storage::disk('local')->path($project->project_path);
+        if ($git->isRepository($repoPath)) {
+            try {
+                $commits = $git->listCommits($repoPath, $commitLimit, $defaultBranch);
+                $commits = $this->enrichCommitsWithKnownContributors($commits, $knownContributors['byEmail']);
+                $gitAvailable = true;
+            } catch (RuntimeException $e) {
+                if ($this->isNoCommitsGitError($e->getMessage())) {
+                    $gitAvailable = true;
+                } else {
+                    $gitError = $e->getMessage();
+                }
+            }
+        }
+
+        $snapshots = ProjectSnapshot::query()
+            ->where('project_id', $project->project_id)
+            ->with([
+                'author:user_id,name,email',
+            ])
+            ->orderByDesc('created_at')
+            ->limit($snapshotLimit)
+            ->get();
+
+        $effectiveRole = $access->resolveEffectiveRole($project, $user);
+        $repoConfigured = (bool) $project->git_enabled
+            && (
+                trim((string) ($project->forgejo_repo_clone_url ?? '')) !== ''
+                || trim((string) ($project->forgejo_repo_full_name ?? '')) !== ''
+            );
+
+        return response()->json([
+            'project' => [
+                'project_id' => (int) $project->project_id,
+                'name' => (string) $project->name,
+                'description' => (string) ($project->description ?? ''),
+                'owner_id' => (int) $project->owner_id,
+                'project_path' => (string) $project->project_path,
+                'is_public' => (bool) $project->is_public,
+                'git_enabled' => (bool) $project->git_enabled,
+                'forgejo_repo_full_name' => (string) ($project->forgejo_repo_full_name ?? ''),
+                'forgejo_repo_clone_url' => (string) ($project->forgejo_repo_clone_url ?? ''),
+                'forgejo_repo_html_url' => (string) ($project->forgejo_repo_html_url ?? ''),
+                'forgejo_default_branch' => $defaultBranch,
+                'forgejo_last_push_at' => $project->forgejo_last_push_at?->toIso8601String(),
+                'created_at' => $project->created_at?->toIso8601String(),
+                'updated_at' => $project->updated_at?->toIso8601String(),
+                'owner' => $project->owner ? [
+                    'user_id' => (int) $project->owner->user_id,
+                    'name' => (string) $project->owner->name,
+                    'email' => (string) $project->owner->email,
+                ] : null,
+            ],
+            'permissions' => [
+                'effective_role' => $effectiveRole,
+                'is_owner' => $access->isOwner($project, $user),
+                'can_manage_settings' => $access->canManageSettings($project, $user),
+                'can_manage_participants' => $access->canManageParticipants($project, $user),
+                'can_write_project' => $access->canWriteProject($project, $user),
+                'can_create_pull_request' => $repoConfigured && $access->canCreatePullRequest($project, $user),
+                'can_connect_repository' => $access->canManageRepository($project, $user),
+                'can_push_direct' => $repoConfigured && $access->canPushDirect($project, $user),
+                'can_sync' => $repoConfigured && $access->canSyncRepository($project, $user),
+            ],
+            'participants' => $participants->map(function (ProjectParticipant $participant): array {
+                return [
+                    'participant_id' => (int) $participant->participant_id,
+                    'project_id' => (int) $participant->project_id,
+                    'user_id' => (int) $participant->user_id,
+                    'role' => ProjectParticipant::normalizeRole((string) ($participant->role ?? ProjectParticipant::ROLE_DEVELOPER)),
+                    'joined_at' => $participant->joined_at?->toIso8601String(),
+                    'user' => $participant->user ? [
+                        'user_id' => (int) $participant->user->user_id,
+                        'name' => (string) $participant->user->name,
+                        'email' => (string) $participant->user->email,
+                    ] : null,
+                ];
+            })->values(),
+            'roles' => ProjectParticipant::roles(),
+            'stats' => $this->buildStats(
+                $project,
+                $knownContributors['byUserId'],
+                $knownContributors['byEmail'],
+                $commits,
+                $periodDays
+            ),
+            'history' => [
+                'git' => [
+                    'available' => $gitAvailable,
+                    'default_branch' => $defaultBranch,
+                    'commit_count' => count($commits),
+                    'error' => $gitError,
+                    'commits' => $commits,
+                ],
+                'snapshots' => $snapshots->map(function (ProjectSnapshot $snapshot): array {
+                    return [
+                        'snapshot_id' => (int) $snapshot->snapshot_id,
+                        'snapshot_hash' => (string) $snapshot->snapshot_hash,
+                        'message' => (string) ($snapshot->message ?? ''),
+                        'snapshot_path' => (string) $snapshot->snapshot_path,
+                        'size_bytes' => $snapshot->size_bytes !== null ? (int) $snapshot->size_bytes : null,
+                        'created_at' => $snapshot->created_at?->toIso8601String(),
+                        'author' => $snapshot->author ? [
+                            'user_id' => (int) $snapshot->author->user_id,
+                            'name' => (string) $snapshot->author->name,
+                            'email' => (string) $snapshot->author->email,
+                        ] : null,
+                    ];
+                })->values(),
+            ],
+        ]);
+    }
+
+    /**
+     * @param array<int, array{user_id: int, name: string, email: string, role: string}> $knownByUserId
+     * @param array<string, array{user_id: int, name: string, email: string, role: string}> $knownByEmail
+     * @param list<array{
+     *   hash: string,
+     *   short_hash: string,
+     *   parents: list<string>,
+     *   author_name: string,
+     *   author_email: string,
+     *   authored_at: string,
+     *   subject: string,
+     *   decorations: string,
+     *   contributor_key?: string,
+     *   user_id?: int|null,
+     *   role?: string
+     * }> $commits
+     * @return array{
+     *   period_days: int,
+     *   from: string,
+     *   to: string,
+      *   total_commits: int,
+      *   total_snapshots: int,
+     *   timeline: list<array{
+     *     date: string,
+     *     commits: int,
+     *     snapshots: int,
+     *     total: int
+     *   }>,
+     *   contributors: list<array{
+     *     key: string,
+     *     user_id: int|null,
+     *     name: string,
+     *     email: string,
+     *     role: string,
+     *     commit_count: int,
+     *     snapshot_count: int,
+     *     last_activity_at: string|null
+     *   }>
+     * }
+     */
+    private function buildStats(
+        Project $project,
+        array $knownByUserId,
+        array $knownByEmail,
+        array $commits,
+        int $periodDays
+    ): array
+    {
+        $now = CarbonImmutable::now();
+        $from = $now->subDays($periodDays);
+        $timelineByDate = [];
+        $cursor = $from->startOfDay();
+        $lastDay = $now->startOfDay();
+        while ($cursor->lessThanOrEqualTo($lastDay)) {
+            $dayKey = $cursor->toDateString();
+            $timelineByDate[$dayKey] = [
+                'date' => $dayKey,
+                'commits' => 0,
+                'snapshots' => 0,
+                'total' => 0,
+            ];
+            $cursor = $cursor->addDay();
+        }
+
+        $contributors = [];
+        $totalCommits = 0;
+        foreach ($commits as $commit) {
+            $authoredAt = $this->safeParseIsoDate((string) ($commit['authored_at'] ?? ''));
+            if ($authoredAt === null || $authoredAt->lt($from)) {
+                continue;
+            }
+
+            $totalCommits++;
+            $email = strtolower(trim((string) ($commit['author_email'] ?? '')));
+            $known = $email !== '' ? ($knownByEmail[$email] ?? null) : null;
+
+            $key = $known !== null
+                ? 'user:'.$known['user_id']
+                : 'external:'.($email !== '' ? $email : strtolower((string) ($commit['author_name'] ?? 'unknown')));
+
+            if (! isset($contributors[$key])) {
+                $contributors[$key] = [
+                    'key' => $key,
+                    'user_id' => $known['user_id'] ?? null,
+                    'name' => $known['name'] ?? (string) ($commit['author_name'] ?? 'Unknown'),
+                    'email' => $known['email'] ?? (string) ($commit['author_email'] ?? ''),
+                    'role' => $known['role'] ?? 'external',
+                    'commit_count' => 0,
+                    'snapshot_count' => 0,
+                    'last_activity_at' => null,
+                ];
+            }
+
+            $contributors[$key]['commit_count']++;
+            $contributors[$key]['last_activity_at'] = $this->maxIsoDate(
+                $contributors[$key]['last_activity_at'],
+                $authoredAt->toIso8601String()
+            );
+
+            $dayKey = $authoredAt->toDateString();
+            if (! isset($timelineByDate[$dayKey])) {
+                $timelineByDate[$dayKey] = [
+                    'date' => $dayKey,
+                    'commits' => 0,
+                    'snapshots' => 0,
+                    'total' => 0,
+                ];
+            }
+            $timelineByDate[$dayKey]['commits']++;
+        }
+
+        $snapshotRows = ProjectSnapshot::query()
+            ->selectRaw('author_user_id, COUNT(*) as snapshot_count, COALESCE(SUM(size_bytes), 0) as total_size_bytes, MAX(created_at) as last_snapshot_at')
+            ->where('project_id', $project->project_id)
+            ->whereNotNull('author_user_id')
+            ->where('created_at', '>=', $from->toDateTimeString())
+            ->groupBy('author_user_id')
+            ->get();
+        $snapshotTimelineRows = ProjectSnapshot::query()
+            ->selectRaw('DATE(created_at) as day, COUNT(*) as snapshot_count')
+            ->where('project_id', $project->project_id)
+            ->where('created_at', '>=', $from->toDateTimeString())
+            ->groupBy('day')
+            ->get();
+
+        $totalSnapshots = 0;
+        foreach ($snapshotRows as $row) {
+            $userId = (int) ($row->author_user_id ?? 0);
+            if ($userId <= 0) {
+                continue;
+            }
+
+            $snapshotCount = (int) ($row->snapshot_count ?? 0);
+            $totalSnapshots += $snapshotCount;
+
+            $known = $knownByUserId[$userId] ?? [
+                'user_id' => $userId,
+                'name' => 'User #'.$userId,
+                'email' => '',
+                'role' => ProjectParticipant::ROLE_DEVELOPER,
+            ];
+            $key = 'user:'.$userId;
+
+            if (! isset($contributors[$key])) {
+                $contributors[$key] = [
+                    'key' => $key,
+                    'user_id' => $known['user_id'],
+                    'name' => $known['name'],
+                    'email' => $known['email'],
+                    'role' => $known['role'],
+                    'commit_count' => 0,
+                    'snapshot_count' => 0,
+                    'last_activity_at' => null,
+                ];
+            }
+
+            $contributors[$key]['snapshot_count'] += $snapshotCount;
+            $contributors[$key]['last_activity_at'] = $this->maxIsoDate(
+                $contributors[$key]['last_activity_at'],
+                $this->safeParseIsoDate((string) ($row->last_snapshot_at ?? ''))?->toIso8601String()
+            );
+        }
+
+        foreach ($snapshotTimelineRows as $row) {
+            $dayKey = trim((string) ($row->day ?? ''));
+            if ($dayKey === '') {
+                continue;
+            }
+
+            if (! isset($timelineByDate[$dayKey])) {
+                $timelineByDate[$dayKey] = [
+                    'date' => $dayKey,
+                    'commits' => 0,
+                    'snapshots' => 0,
+                    'total' => 0,
+                ];
+            }
+
+            $timelineByDate[$dayKey]['snapshots'] += (int) ($row->snapshot_count ?? 0);
+        }
+
+        $contributors = array_values(array_filter(
+            $contributors,
+            fn (array $item): bool => ((int) $item['commit_count'] + (int) $item['snapshot_count']) > 0
+        ));
+
+        usort($contributors, function (array $left, array $right): int {
+            $leftScore = (int) $left['commit_count'] + (int) $left['snapshot_count'];
+            $rightScore = (int) $right['commit_count'] + (int) $right['snapshot_count'];
+
+            if ($leftScore !== $rightScore) {
+                return $rightScore <=> $leftScore;
+            }
+
+            $leftDate = (string) ($left['last_activity_at'] ?? '');
+            $rightDate = (string) ($right['last_activity_at'] ?? '');
+
+            return strcmp($rightDate, $leftDate);
+        });
+
+        ksort($timelineByDate);
+        $timeline = array_values(array_map(function (array $point): array {
+            $point['total'] = (int) $point['commits'] + (int) $point['snapshots'];
+
+            return $point;
+        }, $timelineByDate));
+
+        return [
+            'period_days' => $periodDays,
+            'from' => $from->toIso8601String(),
+            'to' => $now->toIso8601String(),
+            'total_commits' => $totalCommits,
+            'total_snapshots' => $totalSnapshots,
+            'timeline' => $timeline,
+            'contributors' => $contributors,
+        ];
+    }
+
+    /**
+     * @param Collection<int, ProjectParticipant> $participants
+     * @return array{
+     *   byUserId: array<int, array{user_id: int, name: string, email: string, role: string}>,
+     *   byEmail: array<string, array{user_id: int, name: string, email: string, role: string}>
+     * }
+     */
+    private function buildKnownContributorMaps(Project $project, Collection $participants): array
+    {
+        $byUserId = [];
+        $byEmail = [];
+
+        $ownerId = (int) $project->owner_id;
+        $ownerName = (string) ($project->owner?->name ?? 'Owner');
+        $ownerEmail = (string) ($project->owner?->email ?? '');
+
+        $byUserId[$ownerId] = [
+            'user_id' => $ownerId,
+            'name' => $ownerName,
+            'email' => $ownerEmail,
+            'role' => 'owner',
+        ];
+
+        if ($ownerEmail !== '') {
+            $byEmail[strtolower($ownerEmail)] = $byUserId[$ownerId];
+        }
+
+        foreach ($participants as $participant) {
+            $participantUserId = (int) $participant->user_id;
+            $participantName = (string) ($participant->user?->name ?? ('User #'.$participantUserId));
+            $participantEmail = (string) ($participant->user?->email ?? '');
+            $participantRole = ProjectParticipant::normalizeRole((string) ($participant->role ?? ProjectParticipant::ROLE_DEVELOPER));
+
+            $byUserId[$participantUserId] = [
+                'user_id' => $participantUserId,
+                'name' => $participantName,
+                'email' => $participantEmail,
+                'role' => $participantRole,
+            ];
+
+            if ($participantEmail !== '') {
+                $byEmail[strtolower($participantEmail)] = $byUserId[$participantUserId];
+            }
+        }
+
+        return [
+            'byUserId' => $byUserId,
+            'byEmail' => $byEmail,
+        ];
+    }
+
+    /**
+     * @param list<array{
+     *   hash: string,
+     *   short_hash: string,
+     *   parents: list<string>,
+     *   author_name: string,
+     *   author_email: string,
+     *   authored_at: string,
+     *   subject: string,
+     *   decorations: string
+     * }> $commits
+     * @param array<string, array{user_id: int, name: string, email: string, role: string}> $knownByEmail
+     * @return list<array{
+     *   hash: string,
+     *   short_hash: string,
+     *   parents: list<string>,
+     *   author_name: string,
+     *   author_email: string,
+     *   authored_at: string,
+     *   subject: string,
+     *   decorations: string,
+     *   contributor_key: string,
+     *   user_id: int|null,
+     *   role: string
+     * }>
+     */
+    private function enrichCommitsWithKnownContributors(array $commits, array $knownByEmail): array
+    {
+        $result = [];
+        foreach ($commits as $commit) {
+            $email = strtolower(trim((string) ($commit['author_email'] ?? '')));
+            $known = $email !== '' ? ($knownByEmail[$email] ?? null) : null;
+
+            $result[] = array_merge($commit, [
+                'contributor_key' => $known !== null
+                    ? 'user:'.$known['user_id']
+                    : 'external:'.($email !== '' ? $email : strtolower((string) ($commit['author_name'] ?? 'unknown'))),
+                'user_id' => $known['user_id'] ?? null,
+                'role' => $known['role'] ?? 'external',
+            ]);
+        }
+
+        return $result;
+    }
+
+    private function resolveIntQuery(mixed $value, int $default, int $min, int $max): int
+    {
+        $resolved = filter_var($value, FILTER_VALIDATE_INT);
+        if (! is_int($resolved)) {
+            return $default;
+        }
+
+        return max($min, min($resolved, $max));
+    }
+
+    private function isNoCommitsGitError(string $message): bool
+    {
+        $normalized = strtolower($message);
+
+        return str_contains($normalized, 'does not have any commits yet')
+            || str_contains($normalized, 'unknown revision or path not in the working tree')
+            || str_contains($normalized, 'your current branch')
+            || str_contains($normalized, 'has no commits yet');
+    }
+
+    private function safeParseIsoDate(string $value): ?CarbonImmutable
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return null;
+        }
+
+        try {
+            return CarbonImmutable::parse($value);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    private function maxIsoDate(?string $left, ?string $right): ?string
+    {
+        $leftDate = $this->safeParseIsoDate((string) $left);
+        $rightDate = $this->safeParseIsoDate((string) $right);
+
+        if ($leftDate === null) {
+            return $rightDate?->toIso8601String();
+        }
+
+        if ($rightDate === null) {
+            return $leftDate->toIso8601String();
+        }
+
+        return $leftDate->greaterThan($rightDate)
+            ? $leftDate->toIso8601String()
+            : $rightDate->toIso8601String();
+    }
+}

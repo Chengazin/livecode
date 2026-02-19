@@ -6,6 +6,7 @@ use App\Models\Project;
 use App\Models\ProjectParticipant;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class AdminProjectParticipantController extends Controller
 {
@@ -81,6 +82,7 @@ class AdminProjectParticipantController extends Controller
         $data = $request->validate([
             'project_id' => ['required', 'integer', 'exists:projects,project_id'],
             'user_id' => ['required', 'integer', 'exists:users,user_id'],
+            'role' => ['sometimes', 'string', Rule::in(ProjectParticipant::roles())],
             'joined_at' => ['nullable', 'date'],
         ]);
 
@@ -93,6 +95,7 @@ class AdminProjectParticipantController extends Controller
             $participant = ProjectParticipant::query()->create([
                 'project_id' => (int) $data['project_id'],
                 'user_id' => (int) $data['user_id'],
+                'role' => ProjectParticipant::normalizeRole((string) ($data['role'] ?? ProjectParticipant::ROLE_DEVELOPER)),
                 'joined_at' => $data['joined_at'] ?? now(),
             ]);
         } catch (QueryException $exception) {
@@ -116,6 +119,7 @@ class AdminProjectParticipantController extends Controller
         $data = $request->validate([
             'project_id' => ['sometimes', 'integer', 'exists:projects,project_id'],
             'user_id' => ['sometimes', 'integer', 'exists:users,user_id'],
+            'role' => ['sometimes', 'string', Rule::in(ProjectParticipant::roles())],
             'joined_at' => ['nullable', 'date'],
         ]);
 

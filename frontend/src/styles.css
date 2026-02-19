@@ -1459,6 +1459,22 @@ select:focus {
   height: 100%;
 }
 
+.project-tile--clickable {
+  cursor: pointer;
+  transition: border-color 0.16s ease, transform 0.16s ease, box-shadow 0.16s ease;
+}
+
+.project-tile--clickable:hover {
+  border-color: #95afd4;
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(39, 63, 100, 0.08);
+}
+
+.project-tile--clickable:focus-visible {
+  outline: 2px solid #7098cd;
+  outline-offset: 2px;
+}
+
 .project-tile-head {
   display: flex;
   align-items: flex-start;
@@ -1486,10 +1502,14 @@ select:focus {
 
 .project-tile-actions {
   margin-top: auto;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .project-tile-actions .btn {
-  width: 100%;
+  flex: 1 1 130px;
+  width: auto;
 }
 
 .projects-pagination {
@@ -1507,6 +1527,274 @@ select:focus {
 
 .project-tile .btn {
   margin-top: auto;
+}
+
+.project-info-page {
+  gap: 14px;
+}
+
+.project-info-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.project-info-head-main {
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.project-info-head-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.project-info-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.project-info-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 9px;
+}
+
+.project-info-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.project-info-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.project-info-inline-form {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.project-info-metadata {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+}
+
+.project-info-metadata dt {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  margin: 0 0 2px;
+}
+
+.project-info-metadata dd {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.project-info-collaborator-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.project-info-collaborator-row {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-muted);
+  padding: 9px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.project-info-collaborator-row small {
+  display: block;
+  color: var(--text-muted);
+}
+
+.project-info-collaborator-row--owner {
+  border-color: #a2bbdc;
+  background: #edf4ff;
+}
+
+.project-info-collaborator-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.project-info-role-badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #eef4ff;
+  color: #35567f;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 4px 8px;
+}
+
+.project-info-period-field {
+  min-width: 180px;
+}
+
+.project-info-stats-table {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.project-info-stats-row {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-muted);
+  padding: 8px 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.project-info-stats-row small {
+  display: block;
+  color: var(--text-muted);
+}
+
+.project-info-stats-values {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.project-info-timeline {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(44px, 1fr));
+  gap: 8px;
+  align-items: end;
+}
+
+.project-info-timeline-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.project-info-timeline-bars {
+  height: 72px;
+  width: 20px;
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.project-info-timeline-bar {
+  display: inline-block;
+  width: 8px;
+  min-height: 0;
+  border-radius: 4px 4px 0 0;
+}
+
+.project-info-timeline-bar--commits {
+  background: #5a8bc6;
+}
+
+.project-info-timeline-bar--snapshots {
+  background: #8dbf7a;
+}
+
+.project-info-timeline-item small {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.project-info-timeline-legend {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.project-info-timeline-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.project-info-legend-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.project-info-legend-dot--commits {
+  background: #5a8bc6;
+}
+
+.project-info-legend-dot--snapshots {
+  background: #8dbf7a;
+}
+
+.project-info-history-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.project-info-history-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.project-info-history-grid h3 {
+  margin: 0 0 6px;
+}
+
+.project-info-history-list {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-muted);
+  max-height: 340px;
+  overflow: auto;
+}
+
+.project-info-history-row {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.project-info-history-row:last-child {
+  border-bottom: 0;
 }
 
 .git-accordion {
@@ -1675,6 +1963,10 @@ select:focus {
   border-bottom: 1px solid #e0e8f5;
 }
 
+.tree-row-actions {
+  display: inline-flex;
+}
+
 .tree-row:last-child {
   border-bottom: 0;
 }
@@ -1765,6 +2057,7 @@ select:focus {
   white-space: nowrap;
 }
 
+.tree-rename,
 .tree-delete {
   border: 0;
   border-left: 1px solid #e0e8f5;
@@ -1772,6 +2065,14 @@ select:focus {
   color: #8f9ab0;
   width: 34px;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tree-rename:hover {
+  color: #496da2;
+  background: #eef4ff;
 }
 
 .tree-delete:hover {
@@ -2244,9 +2545,15 @@ select:focus {
   color: #cfe0ff;
 }
 
+[data-theme="dark"] .tree-rename,
 [data-theme="dark"] .tree-delete {
   border-left: 1px solid #32435d;
   color: #b4bfd1;
+}
+
+[data-theme="dark"] .tree-rename:hover {
+  background: #162a44;
+  color: #cfe0ff;
 }
 
 [data-theme="dark"] .tree-delete:hover {
@@ -2256,6 +2563,44 @@ select:focus {
 [data-theme="dark"] .project-tile {
   border-color: #314661;
   background: #132339;
+}
+
+[data-theme="dark"] .project-tile--clickable:hover {
+  border-color: #5d7ea9;
+  box-shadow: 0 8px 18px rgba(7, 15, 27, 0.55);
+}
+
+[data-theme="dark"] .project-tile--clickable:focus-visible {
+  outline-color: #86a9da;
+}
+
+[data-theme="dark"] .project-info-chip,
+[data-theme="dark"] .project-info-collaborator-row,
+[data-theme="dark"] .project-info-stats-row,
+[data-theme="dark"] .project-info-history-list {
+  border-color: #314661;
+  background: #132339;
+}
+
+[data-theme="dark"] .project-info-collaborator-row--owner {
+  border-color: #3f5f85;
+  background: #1a2f4d;
+}
+
+[data-theme="dark"] .project-info-role-badge {
+  border-color: #456287;
+  background: #1b3352;
+  color: #cfe0ff;
+}
+
+[data-theme="dark"] .project-info-timeline-bar--commits,
+[data-theme="dark"] .project-info-legend-dot--commits {
+  background: #7aa4d8;
+}
+
+[data-theme="dark"] .project-info-timeline-bar--snapshots,
+[data-theme="dark"] .project-info-legend-dot--snapshots {
+  background: #9bcf88;
 }
 
 [data-theme="dark"] * {
@@ -2393,6 +2738,11 @@ select:focus {
     grid-column: 1 / -1;
   }
 
+  .project-info-grid,
+  .project-info-history-grid {
+    grid-template-columns: 1fr;
+  }
+
   .editor-sidebar {
     max-height: none;
     order: 2;
@@ -2522,6 +2872,38 @@ select:focus {
 
   .projects-pagination {
     justify-content: space-between;
+  }
+
+  .project-info-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .project-info-head-actions .btn {
+    flex: 1 1 140px;
+  }
+
+  .project-info-inline-form {
+    grid-template-columns: 1fr;
+  }
+
+  .project-info-collaborator-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .project-info-collaborator-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .project-info-stats-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .project-info-stats-values {
+    justify-content: flex-start;
   }
 
   .admin-subnav {

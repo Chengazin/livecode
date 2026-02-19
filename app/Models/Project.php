@@ -50,7 +50,7 @@ class Project extends Model
             'user_id',
             'project_id',
             'user_id'
-        )->withPivot(['participant_id', 'joined_at']);
+        )->withPivot(['participant_id', 'role', 'joined_at']);
     }
 
     public function invitations(): HasMany

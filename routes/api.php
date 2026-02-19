@@ -10,6 +10,7 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ForgejoAuthController;
 use App\Http\Controllers\ProjectController;
 use App\Http\Controllers\ProjectForgejoController;
+use App\Http\Controllers\ProjectInfoController;
 use App\Http\Controllers\ProjectInvitationController;
 use App\Http\Controllers\ProjectParticipantController;
 use App\Http\Controllers\ProjectRealtimeController;
@@ -39,6 +40,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Создание проекта: POST /api/projects
     Route::apiResource('projects', ProjectController::class);
+    Route::get('projects/{projectId}/info', [ProjectInfoController::class, 'show']);
     Route::post('projects/{projectId}/filesystem', [ProjectFilesystemController::class, 'handle']);
     Route::get('projects/{projectId}/filesystem/tree', [ProjectFilesystemController::class, 'tree']);
     Route::get('projects/{projectId}/filesystem/file', [ProjectFilesystemController::class, 'readFile']);
@@ -48,6 +50,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('projects/{projectId}/filesystem/item', [ProjectFilesystemController::class, 'deletePath']);
     Route::post('projects/{projectId}/forgejo/connect', [ProjectForgejoController::class, 'connect']);
     Route::post('projects/{projectId}/forgejo/save', [ProjectForgejoController::class, 'save']);
+    Route::post('projects/{projectId}/forgejo/pull-request', [ProjectForgejoController::class, 'pullRequest']);
     Route::post('projects/{projectId}/forgejo/sync', [ProjectForgejoController::class, 'sync']);
     Route::post('projects/{projectId}/realtime/heartbeat', [ProjectRealtimeController::class, 'heartbeat']);
     Route::get('projects/{projectId}/realtime/presence', [ProjectRealtimeController::class, 'presence']);

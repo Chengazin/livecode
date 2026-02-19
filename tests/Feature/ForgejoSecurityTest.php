@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Project;
+use App\Models\ProjectParticipant;
 use App\Models\User;
 use App\Services\ProjectGitService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -557,6 +558,142 @@ class ForgejoSecurityTest extends TestCase
             'http://forgejo:3000/gigabyte/my-repo1.git',
             (string) $project->fresh()->forgejo_repo_clone_url
         );
+    }
+
+    public function test_collaborator_can_create_pull_request_for_configured_repository(): void
+    {
+        config([
+            'services.forgejo.base_url' => 'https://forgejo.example.test',
+            'services.forgejo.public_url' => 'https://forgejo.example.test',
+            'services.forgejo.git_base_url' => 'https://forgejo.example.test',
+            'services.forgejo.client_id' => 'client-id',
+            'services.forgejo.client_secret' => 'client-secret',
+            'services.forgejo.redirect_url' => 'https://app.example.test/forgejo/callback',
+        ]);
+
+        $owner = $this->createUser('pr-owner@example.com');
+        $owner->forgejo_access_token = 'owner-token';
+        $owner->forgejo_connected_at = now();
+        $owner->save();
+
+        $collaborator = $this->createUser('pr-collab@example.com');
+        $collaborator->forgejo_access_token = 'collab-token';
+        $collaborator->forgejo_connected_at = now();
+        $collaborator->save();
+
+        $project = Project::query()->create([
+            'name' => 'PR Demo',
+            'description' => 'demo',
+            'owner_id' => $owner->user_id,
+            'project_path' => 'projects/pr-demo',
+            'is_public' => false,
+        ]);
+        $project->git_enabled = true;
+        $project->forgejo_repo_full_name = 'team/repo';
+        $project->forgejo_repo_clone_url = 'https://forgejo.example.test/team/repo.git';
+        $project->forgejo_default_branch = 'main';
+        $project->forgejo_connected_at = now();
+        $project->save();
+
+        ProjectParticipant::query()->create([
+            'project_id' => $project->project_id,
+            'user_id' => $collaborator->user_id,
+        ]);
+
+        Http::fake([
+            'https://forgejo.example.test/api/v1/repos/team/repo/pulls' => Http::response([
+                'number' => 17,
+                'title' => 'Improve docs',
+                'html_url' => 'https://forgejo.example.test/team/repo/pulls/17',
+            ], 201),
+        ]);
+
+        $this->mock(ProjectGitService::class, function (MockInterface $mock) use ($collaborator): void {
+            $mock->shouldReceive('initRepository')->once();
+            $mock->shouldReceive('commitAll')->once()->andReturn(true);
+            $mock->shouldReceive('pushRefspec')
+                ->once()
+                ->withArgs(function (
+                    string $path,
+                    string $remoteUrl,
+                    string $refspec,
+                    string $token,
+                    array $author,
+                    bool $setUpstream
+                ) use ($collaborator): bool {
+                    return $remoteUrl === 'https://forgejo.example.test/team/repo.git'
+                        && str_starts_with($refspec, 'HEAD:refs/heads/livecode/u'.$collaborator->user_id.'/pr-')
+                        && $token === 'collab-token'
+                        && $setUpstream === false;
+                })
+                ->andReturn("To https://forgejo.example.test/team/repo.git\n * [new branch]      HEAD -> livecode branch");
+        });
+
+        $token = $collaborator->createToken('test')->plainTextToken;
+
+        $response = $this->withToken($token)->postJson('/api/projects/'.$project->project_id.'/forgejo/pull-request', [
+            'title' => 'Improve docs',
+            'body' => 'Adds docs updates.',
+            'message' => 'docs: update readme',
+        ]);
+
+        $response
+            ->assertStatus(201)
+            ->assertJsonPath('status', 'pull_request_created')
+            ->assertJsonPath('number', 17)
+            ->assertJsonPath('html_url', 'https://forgejo.example.test/team/repo/pulls/17');
+
+        $this->assertNotNull($project->fresh()->forgejo_last_push_at);
+    }
+
+    public function test_pull_request_returns_nothing_to_commit_when_repository_has_no_commits(): void
+    {
+        config([
+            'services.forgejo.base_url' => 'http://forgejo:3000',
+            'services.forgejo.public_url' => 'http://localhost:3000',
+            'services.forgejo.git_base_url' => 'http://forgejo:3000',
+            'services.forgejo.client_id' => 'client-id',
+            'services.forgejo.client_secret' => 'client-secret',
+            'services.forgejo.redirect_url' => 'https://app.example.test/forgejo/callback',
+        ]);
+
+        $owner = $this->createUser('pr-empty-owner@example.com');
+        $owner->forgejo_access_token = 'forgejo-token';
+        $owner->forgejo_connected_at = now();
+        $owner->save();
+
+        $project = Project::query()->create([
+            'name' => 'PR Empty',
+            'description' => 'demo',
+            'owner_id' => $owner->user_id,
+            'project_path' => 'projects/pr-empty',
+            'is_public' => false,
+        ]);
+        $project->git_enabled = true;
+        $project->forgejo_repo_full_name = 'gigabyte/my-repo1';
+        $project->forgejo_repo_clone_url = 'http://forgejo:3000/gigabyte/my-repo1.git';
+        $project->forgejo_default_branch = 'main';
+        $project->forgejo_connected_at = now();
+        $project->save();
+
+        $this->mock(ProjectGitService::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('initRepository')->once();
+            $mock->shouldReceive('commitAll')->once()->andReturn(false);
+            $mock->shouldReceive('pushRefspec')->once()->andThrow(
+                new \RuntimeException("error: src refspec HEAD does not match any\nerror: failed to push some refs")
+            );
+        });
+
+        Http::fake();
+
+        $token = $owner->createToken('test')->plainTextToken;
+
+        $response = $this->withToken($token)->postJson('/api/projects/'.$project->project_id.'/forgejo/pull-request', [
+            'title' => 'PR without commits',
+        ]);
+
+        $response->assertOk()->assertJsonPath('status', 'nothing_to_commit');
+        Http::assertNothingSent();
     }
 
     public function test_non_owner_cannot_update_foreign_project(): void

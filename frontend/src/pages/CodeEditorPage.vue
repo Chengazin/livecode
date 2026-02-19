@@ -195,12 +195,35 @@
                 class="tree-open"
                 type="button"
                 @click="clickTreeItem(item)"
+                @dblclick.stop.prevent="renameTreeItem(item)"
               >
                 <span class="tree-indent" :style="{ width: `${item.depth * 14}px` }" />
                 <span class="tree-prefix">{{ item.type === "folder" ? (isExpanded(item.path) ? "v" : ">") : "-" }}</span>
                 <span class="tree-name">{{ item.name }}</span>
               </button>
-              <button class="tree-delete" type="button" :title="t('editor.deleteTitle')" @click="removeTreeItem(item)">x</button>
+              <div class="tree-row-actions">
+                <button
+                  class="tree-rename"
+                  type="button"
+                  :title="t('editor.renameTitle')"
+                  :disabled="moveBusy || nodeBusy"
+                  @click.stop="renameTreeItem(item)"
+                >
+                  <svg viewBox="0 0 24 24" class="tree-action-svg" aria-hidden="true">
+                    <path d="M4 20l4.5-1 9-9-3.5-3.5-9 9L4 20z" />
+                    <path d="M13.5 6.5l3.5 3.5" />
+                  </svg>
+                </button>
+                <button
+                  class="tree-delete"
+                  type="button"
+                  :title="t('editor.deleteTitle')"
+                  :disabled="moveBusy || nodeBusy"
+                  @click.stop="removeTreeItem(item)"
+                >
+                  x
+                </button>
+              </div>
             </div>
           </div>
         </section>
@@ -302,7 +325,9 @@
               </button>
             </div>
 
-            <form class="form-grid compact-form" @submit.prevent="connectProjectForgejo">
+            <p v-if="!isProjectOwner" class="muted-text">{{ t("editor.ownerGitControlsHint") }}</p>
+
+            <form v-if="isProjectOwner" class="form-grid compact-form" @submit.prevent="connectProjectForgejo">
               <label class="field field-row">
                 <span>{{ t("editor.mode") }}</span>
                 <select v-model="forgejoMode">
@@ -329,12 +354,35 @@
               <button class="btn" type="submit" :disabled="forgejoBusy || !selectedProjectId">{{ t("editor.connectProjectRepo") }}</button>
             </form>
 
-            <form class="form-grid compact-form" @submit.prevent="pushToForgejo">
+            <form v-if="isProjectOwner" class="form-grid compact-form" @submit.prevent="pushToForgejo">
               <label class="field field-row">
                 <span>{{ t("editor.commitMessage") }}</span>
                 <input v-model.trim="forgejoMessage" type="text" maxlength="255" :placeholder="t('editor.manualSavePlaceholder')" />
               </label>
               <button class="btn btn-secondary" type="submit" :disabled="forgejoBusy || !selectedProjectId">{{ t("editor.pushToForgejo") }}</button>
+            </form>
+
+            <form v-if="canCreatePullRequest" class="form-grid compact-form" @submit.prevent="createPullRequestInForgejo">
+              <label class="field field-row">
+                <span>{{ t("editor.pullRequestTitle") }}</span>
+                <input v-model.trim="forgejoPrTitle" type="text" maxlength="255" :placeholder="t('editor.pullRequestTitlePlaceholder')" />
+              </label>
+              <label class="field field-row">
+                <span>{{ t("editor.pullRequestCommitMessage") }}</span>
+                <input v-model.trim="forgejoPrMessage" type="text" maxlength="255" :placeholder="t('editor.manualSavePlaceholder')" />
+              </label>
+              <label class="field">
+                <span>{{ t("editor.pullRequestDescription") }}</span>
+                <textarea
+                  v-model.trim="forgejoPrBody"
+                  rows="3"
+                  maxlength="5000"
+                  :placeholder="t('editor.pullRequestDescriptionPlaceholder')"
+                />
+              </label>
+              <button class="btn btn-secondary" type="submit" :disabled="forgejoBusy || !selectedProjectId">
+                {{ forgejoBusy ? t("editor.creatingPullRequest") : t("editor.createPullRequest") }}
+              </button>
             </form>
           </details>
         </section>
@@ -542,6 +590,7 @@ const EDITOR_SYNC_DEBOUNCE_MS = 16;
 const EDITOR_SYNC_RETRY_LOCK_MS = 80;
 const EDITOR_SYNC_RETRY_DEFAULT_MS = 160;
 const CHAT_SYNC_FALLBACK_POLL_INTERVAL_MS = 2500;
+const TREE_ITEM_CLICK_DELAY_MS = 220;
 
 const session = ref(getSession());
 const isAuthenticated = computed(() => Boolean(session.value.accessToken));
@@ -625,6 +674,9 @@ const forgejoMode = ref("create");
 const forgejoRepoName = ref("");
 const forgejoRepoUrl = ref("");
 const forgejoMessage = ref("");
+const forgejoPrTitle = ref("");
+const forgejoPrBody = ref("");
+const forgejoPrMessage = ref("");
 const projectSettingsBusy = ref(false);
 const showProjectSettingsModal = ref(false);
 const projectParticipants = ref([]);
@@ -665,6 +717,7 @@ let editorSyncFallbackPollTimerId = null;
 let realtimeSubscribeWatchTimerId = null;
 let chatFallbackPollTimerId = null;
 let participantsRefreshTimerId = null;
+let treeItemClickTimerId = null;
 let applyingRemoteEditorSync = false;
 let activeRealtimeProjectId = "";
 let editorResizeFrameId = null;
@@ -724,13 +777,17 @@ const isProjectOwner = computed(() => {
   return sessionUserId === ownerId;
 });
 const canManageProjectSettings = computed(() => canUseProjectFs.value && isProjectOwner.value);
+const hasForgejoRepo = computed(() => {
+  return Boolean(projectMeta.value?.git_enabled)
+    && Boolean(projectMeta.value?.forgejo_repo_clone_url || projectMeta.value?.forgejo_repo_full_name);
+});
+const canCreatePullRequest = computed(() => canUseProjectFs.value && hasForgejoRepo.value);
 const canSyncFromForgejo = computed(() => {
   if (!canUseProjectFs.value || !isProjectOwner.value) {
     return false;
   }
 
-  return Boolean(projectMeta.value?.git_enabled)
-    && Boolean(projectMeta.value?.forgejo_repo_clone_url || projectMeta.value?.forgejo_repo_full_name);
+  return hasForgejoRepo.value;
 });
 const syncBusy = computed(() => treeLoading.value || repoSyncBusy.value);
 const canDownloadSelectedFolder = computed(() => {
@@ -1448,6 +1505,18 @@ function resetDragState() {
   isRootDropTarget.value = false;
 }
 
+function clearTreeItemClickTimer() {
+  if (treeItemClickTimerId === null) {
+    return;
+  }
+
+  if (typeof window !== "undefined") {
+    window.clearTimeout(treeItemClickTimerId);
+  }
+
+  treeItemClickTimerId = null;
+}
+
 function canDropToFolder(folderPath) {
   if (!draggedPath.value) {
     return false;
@@ -1554,16 +1623,18 @@ async function moveDraggedPath(targetFolderPath) {
   resetDragState();
 }
 
-async function movePathToFolder(sourcePath, targetFolderPath) {
-  if (!canUseProjectFs.value || !sourcePath || moveBusy.value) {
-    return;
+async function moveTreePath(sourcePath, targetPath, options = {}) {
+  if (!canUseProjectFs.value || !sourcePath || !targetPath || moveBusy.value) {
+    return false;
   }
 
-  const name = basename(sourcePath);
-  const targetPath = targetFolderPath ? `${targetFolderPath}/${name}` : name;
-  if (!targetPath || targetPath === sourcePath) {
-    return;
+  if (sourcePath === targetPath) {
+    return false;
   }
+
+  const noticeBuilder = typeof options.noticeBuilder === "function"
+    ? options.noticeBuilder
+    : (resolvedPath) => t("editor.movedTo", { path: resolvedPath });
 
   moveBusy.value = true;
   error.value = "";
@@ -1605,12 +1676,28 @@ async function movePathToFolder(sourcePath, targetFolderPath) {
 
     expandParents(toPath);
     await loadTree();
-    notice.value = t("editor.movedTo", { path: toPath });
+    notice.value = noticeBuilder(toPath, fromPath);
+    return true;
   } catch (moveError) {
     error.value = readError(moveError);
+    return false;
   } finally {
     moveBusy.value = false;
   }
+}
+
+async function movePathToFolder(sourcePath, targetFolderPath) {
+  if (!canUseProjectFs.value || !sourcePath || moveBusy.value) {
+    return;
+  }
+
+  const name = basename(sourcePath);
+  const targetPath = targetFolderPath ? `${targetFolderPath}/${name}` : name;
+  if (!targetPath || targetPath === sourcePath) {
+    return;
+  }
+
+  await moveTreePath(sourcePath, targetPath);
 }
 
 async function moveSelectedToRoot() {
@@ -1737,6 +1824,7 @@ function resetProjectTreeState() {
   expanded.value = [];
   selectedTreePath.value = "";
   selectedTreeType.value = "";
+  clearTreeItemClickTimer();
   cancelCreateNode();
   resetDragState();
 }
@@ -3348,19 +3436,85 @@ async function openFile(path) {
 function clickTreeItem(item) {
   selectTreeItem(item.path, item.type);
 
-  if (item.type === "folder") {
-    if (isExpanded(item.path)) {
-      expanded.value = expanded.value.filter((path) => path !== item.path);
-    } else {
-      expanded.value = [...expanded.value, item.path];
+  clearTreeItemClickTimer();
+
+  const runPrimaryAction = () => {
+    if (item.type === "folder") {
+      if (isExpanded(item.path)) {
+        expanded.value = expanded.value.filter((path) => path !== item.path);
+      } else {
+        expanded.value = [...expanded.value, item.path];
+      }
+      return;
     }
+
+    void openFile(item.path);
+  };
+
+  if (typeof window === "undefined") {
+    runPrimaryAction();
     return;
   }
 
-  void openFile(item.path);
+  treeItemClickTimerId = window.setTimeout(() => {
+    treeItemClickTimerId = null;
+    runPrimaryAction();
+  }, TREE_ITEM_CLICK_DELAY_MS);
+}
+
+async function renameTreeItem(item) {
+  clearTreeItemClickTimer();
+
+  if (!canUseProjectFs.value || !item?.path || moveBusy.value || nodeBusy.value) {
+    return;
+  }
+
+  const currentName = basename(item.path);
+  const renamed = window.prompt(
+    t("editor.renamePrompt", {
+      type: localizeNodeType(item.type),
+      name: currentName,
+    }),
+    currentName,
+  );
+
+  if (renamed === null) {
+    return;
+  }
+
+  const nextName = String(renamed).trim();
+  if (!nextName) {
+    error.value = t("editor.renameEmpty");
+    notice.value = "";
+    return;
+  }
+
+  if (nextName.includes("/") || nextName.includes("\\")) {
+    error.value = t("editor.renameInvalidName");
+    notice.value = "";
+    return;
+  }
+
+  if (nextName === currentName) {
+    notice.value = t("editor.renameUnchanged");
+    error.value = "";
+    return;
+  }
+
+  const parent = parentPath(item.path);
+  const nextPath = parent ? `${parent}/${nextName}` : nextName;
+
+  await moveTreePath(item.path, nextPath, {
+    noticeBuilder: (resolvedPath) => t("editor.renamedTo", {
+      type: localizeNodeType(item.type),
+      path: resolvedPath,
+    }),
+  });
 }
 
 async function removeTreeItem(item) {
+  clearTreeItemClickTimer();
+
   if (!canUseProjectFs.value) {
     return;
   }
@@ -3558,6 +3712,63 @@ async function pushToForgejo() {
       : t("editor.pushed");
   } catch (pushError) {
     error.value = readError(pushError);
+  } finally {
+    forgejoBusy.value = false;
+  }
+}
+
+async function createPullRequestInForgejo() {
+  if (!selectedProjectId.value) {
+    error.value = t("editor.selectProjectFirst");
+    return;
+  }
+
+  forgejoBusy.value = true;
+  error.value = "";
+
+  try {
+    const body = {};
+
+    if (forgejoPrTitle.value) {
+      body.title = forgejoPrTitle.value;
+    }
+
+    if (forgejoPrBody.value) {
+      body.body = forgejoPrBody.value;
+    }
+
+    if (forgejoPrMessage.value) {
+      body.message = forgejoPrMessage.value;
+    }
+
+    const response = await request({
+      method: "POST",
+      path: `/projects/${selectedProjectId.value}/forgejo/pull-request`,
+      auth: true,
+      body,
+    });
+
+    if (response.data?.status === "nothing_to_commit") {
+      notice.value = t("editor.nothingToCommit");
+      return;
+    }
+
+    const number = Number(response.data?.number || 0);
+    if (number > 0) {
+      notice.value = t("editor.pullRequestCreated", { number });
+    } else {
+      notice.value = t("editor.pullRequestCreated", { number: "?" });
+    }
+
+    if (typeof response.data?.html_url === "string" && response.data.html_url.trim() !== "") {
+      notice.value = `${notice.value} ${response.data.html_url.trim()}`;
+    }
+
+    forgejoPrTitle.value = "";
+    forgejoPrBody.value = "";
+    forgejoPrMessage.value = "";
+  } catch (pullRequestError) {
+    error.value = readError(pullRequestError);
   } finally {
     forgejoBusy.value = false;
   }
@@ -3942,6 +4153,7 @@ onMounted(() => {
 onUnmounted(() => {
   stopPaneResize();
   stopTerminalDockResize();
+  clearTreeItemClickTimer();
 
   if (typeof window !== "undefined") {
     window.removeEventListener("resize", onViewportResize);
