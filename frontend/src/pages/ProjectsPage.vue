@@ -68,7 +68,7 @@
                 <p v-else class="muted-text">{{ t("projects.noDescription") }}</p>
               </div>
               <div class="project-tile-actions">
-                <button class="btn btn-sm btn-ghost" type="button" @click.stop="openProjectInfo(project.project_id)">
+                <button class="btn btn-ghost" type="button" @click.stop="openProjectInfo(project.project_id)">
                   {{ t("projects.openProjectInfo") }}
                 </button>
                 <button class="btn btn-secondary" type="button" @click.stop="openProject(project.project_id)">
@@ -115,7 +115,7 @@
                   <p v-else class="muted-text">{{ t("projects.noDescription") }}</p>
                 </div>
                 <div class="project-tile-actions">
-                  <button class="btn btn-sm btn-ghost" type="button" @click.stop="openProjectInfo(project.project_id)">
+                  <button class="btn btn-ghost" type="button" @click.stop="openProjectInfo(project.project_id)">
                     {{ t("projects.openProjectInfo") }}
                   </button>
                   <button class="btn btn-secondary" type="button" @click.stop="openProject(project.project_id)">
@@ -335,3 +335,4 @@ onMounted(() => {
   void loadProjects();
 });
 </script>
+    

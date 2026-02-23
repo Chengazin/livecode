@@ -63,6 +63,11 @@ class Project extends Model
         return $this->hasMany(ProjectSnapshot::class, 'project_id', 'project_id');
     }
 
+    public function codeComments(): HasMany
+    {
+        return $this->hasMany(ProjectCodeComment::class, 'project_id', 'project_id');
+    }
+
     public function terminalSessions(): HasMany
     {
         return $this->hasMany(ProjectTerminalSession::class, 'project_id', 'project_id');

@@ -11,13 +11,7 @@ npm install
 ## Dev run
 
 1. Start Laravel backend (default: `http://127.0.0.1:8000`).
-2. Start Reverb websocket server (default: `ws://127.0.0.1:8081`):
-
-```bash
-php artisan reverb:start --host=0.0.0.0 --port=8081
-```
-
-3. Start frontend:
+2. Start frontend:
 
 ```bash
 npm run serve
@@ -33,10 +27,6 @@ Use `frontend/.env.example`:
 VUE_APP_BACKEND_URL=http://127.0.0.1:8000
 # Optional:
 # VUE_APP_API_BASE_URL=http://127.0.0.1:8000/api
-VUE_APP_REVERB_APP_KEY=livecode-key
-VUE_APP_REVERB_HOST=127.0.0.1
-VUE_APP_REVERB_PORT=8081
-VUE_APP_REVERB_SCHEME=http
 ```
 
 ## Available pages

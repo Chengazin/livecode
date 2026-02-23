@@ -592,15 +592,6 @@ function destroyTerminal() {
   fitAddon = null;
 }
 
-function handleRealtimeSessionUpdate(event) {
-  const updatedProjectId = Number(event?.detail?.projectId || 0);
-  if (!updatedProjectId || updatedProjectId !== Number(projectIdValue.value || 0)) {
-    return;
-  }
-
-  void refreshSessions({ quiet: true });
-}
-
 watch(projectIdValue, (value) => {
   disconnectSocket("project-changed");
   error.value = "";
@@ -630,7 +621,6 @@ onMounted(() => {
   initializeTerminal();
 
   if (typeof window !== "undefined") {
-    window.addEventListener("project-terminal-session-updated", handleRealtimeSessionUpdate);
     window.addEventListener("resize", scheduleTerminalFit);
 
     refreshTimerId = window.setInterval(() => {
@@ -645,7 +635,6 @@ onUnmounted(() => {
   disconnectSocket("component-unmount");
 
   if (typeof window !== "undefined") {
-    window.removeEventListener("project-terminal-session-updated", handleRealtimeSessionUpdate);
     window.removeEventListener("resize", scheduleTerminalFit);
 
     if (refreshTimerId !== null) {
