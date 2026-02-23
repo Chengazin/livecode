@@ -497,6 +497,8 @@ const realtimeRemoteColors = [
   "#be123c",
   "#1f7a8c",
 ];
+const EDITOR_SYNC_DEBOUNCE_MS = 36;
+const EDITOR_SYNC_DELETE_DEBOUNCE_MS = 160;
 const AceRange = ace.require("ace/range").Range;
 
 let activeRealtimeProjectId = "";
@@ -2045,6 +2047,54 @@ function ensureEditorSyncPathState(path) {
   }
 }
 
+function mergeQueuedEditorOperations(previousInput, nextInput) {
+  const previous = normalizeTextOperation(previousInput || {});
+  const next = normalizeTextOperation(nextInput || {});
+
+  if (!previous.client_id || previous.client_id !== next.client_id) {
+    return null;
+  }
+
+  const previousInsertOnly = previous.delete_count === 0;
+  const nextInsertOnly = next.delete_count === 0;
+
+  if (previousInsertOnly && nextInsertOnly) {
+    if ((previous.start + previous.insert_text.length) !== next.start) {
+      return null;
+    }
+
+    return {
+      ...previous,
+      insert_text: `${previous.insert_text}${next.insert_text}`,
+    };
+  }
+
+  const previousDeleteOnly = previous.insert_text === "" && previous.delete_count > 0;
+  const nextDeleteOnly = next.insert_text === "" && next.delete_count > 0;
+  if (!previousDeleteOnly || !nextDeleteOnly) {
+    return null;
+  }
+
+  // Delete key: repeated removals from the same cursor index.
+  if (next.start === previous.start) {
+    return {
+      ...previous,
+      delete_count: previous.delete_count + next.delete_count,
+    };
+  }
+
+  // Backspace: each next delete expands the range to the left.
+  if ((next.start + next.delete_count) === previous.start) {
+    return {
+      ...previous,
+      start: next.start,
+      delete_count: previous.delete_count + next.delete_count,
+    };
+  }
+
+  return null;
+}
+
 function queueLocalEditorOperation(deltaInput) {
   if (applyingRemoteEditorChange) {
     dirty.value = false;
@@ -2068,20 +2118,14 @@ function queueLocalEditorOperation(deltaInput) {
 
   const lastIndex = editorSyncPendingOps.length - 1;
   const previous = editorSyncPendingOps[lastIndex];
-  const canMergeInsert = previous
-    && previous.base_revision === editorSyncRevision.value
-    && previous.operation.delete_count === 0
-    && operation.delete_count === 0
-    && previous.operation.start + previous.operation.insert_text.length === operation.start
-    && previous.operation.client_id === operation.client_id;
+  const mergedOperation = previous
+    ? mergeQueuedEditorOperations(previous.operation, operation)
+    : null;
 
-  if (canMergeInsert) {
+  if (previous && mergedOperation) {
     editorSyncPendingOps[lastIndex] = {
       ...previous,
-      operation: {
-        ...previous.operation,
-        insert_text: `${previous.operation.insert_text}${operation.insert_text}`,
-      },
+      operation: mergedOperation,
     };
   } else {
     editorSyncPendingOps.push({
@@ -2093,7 +2137,8 @@ function queueLocalEditorOperation(deltaInput) {
     });
   }
 
-  scheduleEditorSync();
+  const isDeleteOperation = operation.insert_text === "" && operation.delete_count > 0;
+  scheduleEditorSync(isDeleteOperation ? EDITOR_SYNC_DELETE_DEBOUNCE_MS : EDITOR_SYNC_DEBOUNCE_MS);
   schedulePresenceSync(160);
 }
 
@@ -2191,7 +2236,7 @@ async function bootstrapEditorRealtimeState(seedContent = "", options = {}) {
   }
 }
 
-function scheduleEditorSync() {
+function scheduleEditorSync(delay = EDITOR_SYNC_DEBOUNCE_MS) {
   if (!canUseProjectFs.value || !liveSyncEnabled.value || !activeProjectPath.value) {
     return;
   }
@@ -2209,7 +2254,7 @@ function scheduleEditorSync() {
   editorSyncDebounceTimerId = window.setTimeout(() => {
     editorSyncDebounceTimerId = null;
     void flushEditorSyncQueue();
-  }, 24);
+  }, Math.max(0, Number(delay || EDITOR_SYNC_DEBOUNCE_MS)));
 }
 
 async function flushEditorSyncQueue() {
