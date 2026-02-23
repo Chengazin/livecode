@@ -22,13 +22,21 @@ function normalizePort(value, fallback) {
   return parsed;
 }
 
+function resolveDefaultHost() {
+  if (typeof window === "undefined") {
+    return "127.0.0.1";
+  }
+
+  const hostname = normalizeString(window.location.hostname, "localhost");
+
+  // Avoid IPv6 localhost (::1) resolution when Reverb listens on IPv4.
+  return hostname === "localhost" ? "127.0.0.1" : hostname;
+}
+
 function resolveClientConfig(token) {
   const isSecureContext = typeof window !== "undefined" && window.location.protocol === "https:";
   const scheme = normalizeString(process.env.VUE_APP_REVERB_SCHEME, isSecureContext ? "https" : "http").toLowerCase();
-  const host = normalizeString(
-    process.env.VUE_APP_REVERB_HOST,
-    typeof window !== "undefined" ? window.location.hostname : "localhost",
-  );
+  const host = normalizeString(process.env.VUE_APP_REVERB_HOST, resolveDefaultHost());
   const defaultPort = scheme === "https" ? 443 : 80;
   const port = normalizePort(process.env.VUE_APP_REVERB_PORT, defaultPort);
   const key = normalizeString(process.env.VUE_APP_REVERB_APP_KEY, "livecode-key");
