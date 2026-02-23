@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Events\ProjectRealtimeEvent;
 use App\Models\Project;
+use App\Models\User;
 use App\Services\ProjectAccessService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -11,13 +12,22 @@ use Illuminate\Support\Facades\Cache;
 
 class ProjectRealtimeController extends Controller
 {
+    private const DEFAULT_AVATAR_PRESET = 'robot';
+
     private const PRESENCE_TTL_SECONDS = 20;
+
     private const CHAT_TTL_SECONDS = 43200;
+
     private const CHAT_MAX_MESSAGES = 200;
+
     private const EDITOR_STATE_TTL_SECONDS = 43200;
+
     private const EDITOR_MAX_CONTENT_LENGTH = 524288;
+
     private const EDITOR_MAX_INSERT_LENGTH = 524288;
+
     private const EDITOR_MAX_HISTORY = 500;
+
     private const EDITOR_LOCK_TTL_SECONDS = 5;
 
     public function heartbeat(
@@ -40,6 +50,10 @@ class ProjectRealtimeController extends Controller
             'path' => ['nullable', 'string', 'max:2048'],
             'cursor_row' => ['nullable', 'integer', 'min:0'],
             'cursor_column' => ['nullable', 'integer', 'min:0'],
+            'selection_start_row' => ['nullable', 'integer', 'min:0'],
+            'selection_start_column' => ['nullable', 'integer', 'min:0'],
+            'selection_end_row' => ['nullable', 'integer', 'min:0'],
+            'selection_end_column' => ['nullable', 'integer', 'min:0'],
         ]);
 
         $key = $this->presenceKey($project->project_id);
@@ -51,9 +65,15 @@ class ProjectRealtimeController extends Controller
         $entries[(string) $user->user_id] = [
             'user_id' => (int) $user->user_id,
             'name' => (string) ($user->name ?: $user->email ?: 'User #'.$user->user_id),
+            'avatar_preset' => $this->normalizeAvatarPreset($user->avatar_preset),
+            'avatar_url' => $this->resolveAvatarUrl($user),
             'path' => array_key_exists('path', $data) ? (string) ($data['path'] ?? '') : '',
             'cursor_row' => array_key_exists('cursor_row', $data) ? $data['cursor_row'] : null,
             'cursor_column' => array_key_exists('cursor_column', $data) ? $data['cursor_column'] : null,
+            'selection_start_row' => array_key_exists('selection_start_row', $data) ? $data['selection_start_row'] : null,
+            'selection_start_column' => array_key_exists('selection_start_column', $data) ? $data['selection_start_column'] : null,
+            'selection_end_row' => array_key_exists('selection_end_row', $data) ? $data['selection_end_row'] : null,
+            'selection_end_column' => array_key_exists('selection_end_column', $data) ? $data['selection_end_column'] : null,
             'seen_at' => now()->timestamp,
         ];
 
@@ -155,6 +175,10 @@ class ProjectRealtimeController extends Controller
             $filtered = array_slice($filtered, -$limit);
         }
 
+        $filtered = array_map(function ($message): array {
+            return $this->formatChatEntry(is_array($message) ? $message : []);
+        }, $filtered);
+
         $latestId = 0;
         if (count($messages) > 0) {
             $lastMessage = end($messages);
@@ -197,13 +221,15 @@ class ProjectRealtimeController extends Controller
         Cache::add($seqKey, 0, now()->addSeconds(self::CHAT_TTL_SECONDS));
         $messageId = (int) Cache::increment($seqKey);
 
-        $entry = [
+        $entry = $this->formatChatEntry([
             'id' => $messageId,
             'user_id' => (int) $user->user_id,
             'user_name' => (string) ($user->name ?: $user->email ?: 'User #'.$user->user_id),
+            'avatar_preset' => $this->normalizeAvatarPreset($user->avatar_preset),
+            'avatar_url' => $this->resolveAvatarUrl($user),
             'message' => $text,
             'created_at' => now()->toISOString(),
-        ];
+        ]);
 
         $key = $this->chatKey($project->project_id);
         $messages = Cache::get($key, []);
@@ -246,14 +272,14 @@ class ProjectRealtimeController extends Controller
         }
 
         $project = Project::query()->findOrFail($projectId);
-        if (! $access->userHasAccess($project, $user)) {
+        if (! $access->canWriteProject($project, $user)) {
             return response()->json(['message' => 'Access denied.'], 403);
         }
 
         $data = $request->validate([
             'path' => ['required', 'string', 'max:2048'],
-            'client_id' => ['required', 'string', 'max:128'],
-            'op_id' => ['required', 'string', 'max:128'],
+            'client_id' => ['required', 'string', 'min:3', 'max:128'],
+            'op_id' => ['required', 'string', 'min:3', 'max:128'],
             'base_revision' => ['required', 'integer', 'min:0'],
             'start' => ['required', 'integer', 'min:0'],
             'delete_count' => ['required', 'integer', 'min:0'],
@@ -477,14 +503,68 @@ class ProjectRealtimeController extends Controller
      */
     private function formatPresenceEntry(array $entry): array
     {
+        $avatarUrl = trim((string) ($entry['avatar_url'] ?? ''));
+
         return [
             'user_id' => (int) ($entry['user_id'] ?? 0),
             'name' => (string) ($entry['name'] ?? ''),
+            'avatar_preset' => $this->normalizeAvatarPreset(
+                is_string($entry['avatar_preset'] ?? null) ? $entry['avatar_preset'] : null
+            ),
+            'avatar_url' => $avatarUrl !== '' ? $avatarUrl : null,
             'path' => (string) ($entry['path'] ?? ''),
             'cursor_row' => $entry['cursor_row'] !== null ? (int) $entry['cursor_row'] : null,
             'cursor_column' => $entry['cursor_column'] !== null ? (int) $entry['cursor_column'] : null,
+            'selection_start_row' => $entry['selection_start_row'] !== null ? (int) $entry['selection_start_row'] : null,
+            'selection_start_column' => $entry['selection_start_column'] !== null ? (int) $entry['selection_start_column'] : null,
+            'selection_end_row' => $entry['selection_end_row'] !== null ? (int) $entry['selection_end_row'] : null,
+            'selection_end_column' => $entry['selection_end_column'] !== null ? (int) $entry['selection_end_column'] : null,
             'seen_at' => (int) ($entry['seen_at'] ?? 0),
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $entry
+     * @return array<string, mixed>
+     */
+    private function formatChatEntry(array $entry): array
+    {
+        $userId = (int) ($entry['user_id'] ?? 0);
+        $userName = trim((string) ($entry['user_name'] ?? ''));
+        $avatarUrl = trim((string) ($entry['avatar_url'] ?? ''));
+
+        return [
+            'id' => max(0, (int) ($entry['id'] ?? 0)),
+            'user_id' => $userId,
+            'user_name' => $userName !== '' ? $userName : 'User #'.($userId > 0 ? $userId : '?'),
+            'avatar_preset' => $this->normalizeAvatarPreset(
+                is_string($entry['avatar_preset'] ?? null) ? $entry['avatar_preset'] : null
+            ),
+            'avatar_url' => $avatarUrl !== '' ? $avatarUrl : null,
+            'message' => (string) ($entry['message'] ?? ''),
+            'created_at' => (string) ($entry['created_at'] ?? ''),
+        ];
+    }
+
+    private function normalizeAvatarPreset(?string $avatarPreset): string
+    {
+        $value = trim((string) ($avatarPreset ?? ''));
+
+        return $value !== '' ? $value : self::DEFAULT_AVATAR_PRESET;
+    }
+
+    private function resolveAvatarUrl(User $user): ?string
+    {
+        if ((string) $user->avatar_type !== 'upload') {
+            return null;
+        }
+
+        $path = trim((string) ($user->avatar_path ?? ''));
+        if ($path === '') {
+            return null;
+        }
+
+        return '/storage/'.ltrim($path, '/');
     }
 
     private function presenceKey(int $projectId): string
@@ -515,14 +595,27 @@ class ProjectRealtimeController extends Controller
      * @param array<string, mixed> $operation
      * @return array<string, mixed>
      */
+    private function normalizeEditorOperationShape(array $operation): array
+    {
+        return [
+            'start' => max(0, (int) ($operation['start'] ?? 0)),
+            'delete_count' => max(0, (int) ($operation['delete_count'] ?? 0)),
+            'insert_text' => (string) ($operation['insert_text'] ?? ''),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $operation
+     * @return array<string, mixed>
+     */
     private function sanitizeEditorOperation(array $operation, string $content): array
     {
+        $normalized = $this->normalizeEditorOperationShape($operation);
         $contentLength = $this->textLength($content);
-        $start = max(0, min((int) ($operation['start'] ?? 0), $contentLength));
-        $deleteCount = max(0, (int) ($operation['delete_count'] ?? 0));
+        $start = max(0, min((int) $normalized['start'], $contentLength));
+        $deleteCount = max(0, (int) $normalized['delete_count']);
         $deleteCount = min($deleteCount, max(0, $contentLength - $start));
-        $insertText = (string) ($operation['insert_text'] ?? '');
-        $insertText = $this->truncateEditorInsert($insertText);
+        $insertText = $this->truncateEditorInsert((string) $normalized['insert_text']);
 
         return [
             'start' => $start,
@@ -573,7 +666,8 @@ class ProjectRealtimeController extends Controller
                 continue;
             }
 
-            $operation = $this->sanitizeEditorOperation($operationRaw, '');
+            $operation = $this->normalizeEditorOperationShape($operationRaw);
+            $operation['insert_text'] = $this->truncateEditorInsert((string) $operation['insert_text']);
 
             $normalized[] = [
                 'revision' => max(0, (int) ($entry['revision'] ?? 0)),
@@ -624,6 +718,9 @@ class ProjectRealtimeController extends Controller
         ];
     }
 
+    /**
+     * @return array<string, mixed>
+     */
     private function createEditorState(string $path, string $content): array
     {
         return [

@@ -92,7 +92,7 @@
         </div>
 
         <form v-if="canManageParticipants" class="form-grid compact-form project-info-inline-form" @submit.prevent="addCollaborator">
-          <label class="field field-row">
+          <label class="field">
             <span>{{ t("editor.collaboratorUserId") }}</span>
             <input
               v-model.trim="newCollaboratorUserId"
@@ -103,13 +103,13 @@
               :placeholder="t('editor.collaboratorUserIdPlaceholder')"
             />
           </label>
-          <label class="field field-row">
+          <label class="field">
             <span>{{ t("projectInfo.accessRole") }}</span>
             <select v-model="newCollaboratorRole">
               <option v-for="role in assignableRoles" :key="`add-role-${role}`" :value="role">{{ roleLabel(role) }}</option>
             </select>
           </label>
-          <button class="btn btn-secondary" type="submit" :disabled="collaboratorBusy || !newCollaboratorUserId">
+          <button class="btn btn-secondary project-info-inline-submit" type="submit" :disabled="collaboratorBusy || !newCollaboratorUserId">
             {{ collaboratorBusy ? t("common.saving") : t("editor.addCollaborator") }}
           </button>
         </form>
@@ -221,17 +221,128 @@
             <h3>{{ t("projectInfo.gitHistoryTitle") }}</h3>
             <p v-if="history.git?.error" class="muted-text">{{ history.git.error }}</p>
             <p v-else-if="!history.git?.available" class="muted-text">{{ t("projectInfo.gitHistoryUnavailable") }}</p>
-            <p v-else-if="filteredGitCommits.length === 0" class="muted-text">{{ t("projectInfo.gitHistoryEmpty") }}</p>
-            <div v-else class="project-info-history-list">
-              <article v-for="commit in filteredGitCommits" :key="commit.hash" class="project-info-history-row">
-                <header>
-                  <strong><code>{{ commit.short_hash }}</code> {{ commit.subject }}</strong>
-                </header>
-                <small>
-                  {{ commit.author_name }} - {{ formatDateTime(commit.authored_at) }}
-                </small>
-              </article>
-            </div>
+            <template v-else>
+              <div v-if="isForgejoConnected" class="project-info-git-tree-shell">
+                <h4>{{ t("projectInfo.gitGraphTitle") }}</h4>
+                <p class="muted-text">{{ t("projectInfo.gitGraphHint") }}</p>
+                <p v-if="history.git?.tree_error" class="muted-text">{{ history.git.tree_error }}</p>
+                <p v-else-if="!history.git?.tree_available" class="muted-text">{{ t("projectInfo.gitTreeUnavailable") }}</p>
+                <p v-else-if="!gitVisualGraph.ready" class="muted-text">{{ t("projectInfo.gitGraphEmpty") }}</p>
+                <div v-else class="project-info-git-graph-root">
+                  <div class="project-info-git-graph-legend">
+                    <div
+                      v-for="branch in gitVisualGraph.branches"
+                      :key="`graph-branch-${branch.name}`"
+                      class="project-info-git-graph-legend-item"
+                    >
+                      <i class="project-info-git-graph-legend-color" :style="{ background: branch.color }" />
+                      <code>{{ branch.name }}</code>
+                      <small v-if="branch.is_default">{{ t("projectInfo.gitGraphRoot") }}</small>
+                      <small v-if="branch.is_current">{{ t("projectInfo.gitTreeCurrent") }}</small>
+                    </div>
+                  </div>
+
+                  <div
+                    ref="gitGraphCanvasWrapRef"
+                    class="project-info-git-graph-canvas-wrap"
+                    @mouseleave="hideGitNodeTooltip"
+                  >
+                    <svg
+                      class="project-info-git-graph-canvas"
+                      :viewBox="`0 0 ${gitVisualGraph.width} ${gitVisualGraph.height}`"
+                      preserveAspectRatio="xMinYMin meet"
+                      role="img"
+                      :aria-label="t('projectInfo.gitGraphTitle')"
+                    >
+                      <g class="project-info-git-graph-lanes">
+                        <line
+                          v-for="branch in gitVisualGraph.branches"
+                          :key="`graph-lane-${branch.name}`"
+                          class="project-info-git-graph-lane"
+                          :x1="branch.x"
+                          :y1="gitVisualGraph.laneTop"
+                          :x2="branch.x"
+                          :y2="gitVisualGraph.laneBottom"
+                          :style="{ stroke: branch.color }"
+                        />
+                      </g>
+
+                      <g class="project-info-git-graph-edges">
+                        <path
+                          v-for="edge in gitVisualGraph.edges"
+                          :key="edge.key"
+                          class="project-info-git-graph-edge"
+                          :class="{ 'is-cross-branch': edge.dashed }"
+                          :d="edge.path"
+                          :style="{ stroke: edge.color }"
+                        />
+                      </g>
+
+                      <g class="project-info-git-graph-nodes">
+                        <g
+                          v-for="node in gitVisualGraph.nodes"
+                          :key="`graph-node-${node.id}`"
+                          :transform="`translate(${node.x} ${node.y})`"
+                          @mouseenter="showGitNodeTooltip($event, node)"
+                          @mousemove="moveGitNodeTooltip($event)"
+                          @mouseleave="hideGitNodeTooltip"
+                        >
+                          <circle
+                            class="project-info-git-graph-node"
+                            r="5"
+                            :style="{ fill: node.color }"
+                          />
+                          <circle class="project-info-git-graph-node-core" r="2" />
+                          <title>{{ `${node.short_hash} | ${node.subject} | ${formatDateTime(node.authored_at)}` }}</title>
+                        </g>
+                      </g>
+                    </svg>
+
+                    <div
+                      v-if="gitNodeTooltip.visible && gitNodeTooltip.node"
+                      class="project-info-git-graph-tooltip"
+                      :style="{ left: `${gitNodeTooltip.x}px`, top: `${gitNodeTooltip.y}px` }"
+                    >
+                      <strong><code>{{ gitNodeTooltip.node.short_hash }}</code> {{ gitNodeTooltip.node.subject || "-" }}</strong>
+                      <small>{{ t("projectInfo.gitGraphTooltipAuthor") }}: {{ gitNodeTooltip.node.author_name || t("projectInfo.unknownAuthor") }}</small>
+                      <small>{{ t("projectInfo.gitGraphTooltipDate") }}: {{ formatDateTime(gitNodeTooltip.node.authored_at) }}</small>
+                      <small>{{ t("projectInfo.gitGraphTooltipBranch") }}: {{ resolveGraphNodeBranchLabel(gitNodeTooltip.node) }}</small>
+                    </div>
+                  </div>
+
+                  <div class="project-info-git-graph-node-list">
+                    <h5>{{ t("projectInfo.gitGraphNodeListTitle") }}</h5>
+                    <div class="project-info-git-graph-node-rows">
+                      <article
+                        v-for="node in gitGraphNodePreview"
+                        :key="`graph-row-${node.id}`"
+                        class="project-info-git-graph-node-row"
+                      >
+                        <i class="project-info-git-graph-node-dot" :style="{ background: node.color }" />
+                        <div>
+                          <strong><code>{{ node.short_hash }}</code> {{ node.subject }}</strong>
+                          <small>
+                            {{ resolveGraphNodeBranchLabel(node) }} - {{ formatDateTime(node.authored_at) }}
+                          </small>
+                        </div>
+                      </article>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <p v-if="filteredGitCommits.length === 0" class="muted-text">{{ t("projectInfo.gitHistoryEmpty") }}</p>
+              <div v-else class="project-info-history-list">
+                <article v-for="commit in filteredGitCommits" :key="commit.hash" class="project-info-history-row">
+                  <header>
+                    <strong><code>{{ commit.short_hash }}</code> {{ commit.subject }}</strong>
+                  </header>
+                  <small>
+                    {{ commit.author_name }} - {{ formatDateTime(commit.authored_at) }}
+                  </small>
+                </article>
+              </div>
+            </template>
           </div>
 
           <div>
@@ -277,6 +388,13 @@ const payload = ref(null);
 const participants = ref([]);
 const periodDays = ref(30);
 const commitLimit = ref(200);
+const gitGraphCanvasWrapRef = ref(null);
+const gitNodeTooltip = reactive({
+  visible: false,
+  x: 10,
+  y: 10,
+  node: null,
+});
 
 const newCollaboratorUserId = ref("");
 const newCollaboratorRole = ref("developer");
@@ -355,6 +473,341 @@ const statsTimeline = computed(() => {
       ? Math.max(8, Math.round((point.snapshots / normalizedMax) * 100))
       : 0,
   }));
+});
+
+const isForgejoConnected = computed(() => {
+  if (!project.value?.git_enabled) {
+    return false;
+  }
+
+  return String(project.value?.forgejo_repo_full_name || "").trim() !== ""
+    || String(project.value?.forgejo_repo_clone_url || "").trim() !== "";
+});
+
+const gitBranchTree = computed(() => {
+  return Array.isArray(history.value?.git?.branch_tree) ? history.value.git.branch_tree : [];
+});
+
+const filteredGitBranchTree = computed(() => {
+  const filterKey = String(historyAuthorFilter.value || "all");
+
+  return gitBranchTree.value
+    .map((branch) => {
+      const branchName = String(branch?.name || "").trim();
+      const dateGroups = Array.isArray(branch?.dates) ? branch.dates : [];
+      const filteredDates = dateGroups
+        .map((dateGroup) => {
+          const commits = Array.isArray(dateGroup?.commits) ? dateGroup.commits : [];
+          const filteredCommits = filterKey === "all"
+            ? commits
+            : commits.filter((commit) => resolveCommitContributorKey(commit) === filterKey);
+
+          return {
+            date: String(dateGroup?.date || ""),
+            count: filteredCommits.length,
+            commits: filteredCommits,
+          };
+        })
+        .filter((dateGroup) => dateGroup.count > 0);
+
+      return {
+        name: branchName,
+        is_default: Boolean(branch?.is_default),
+        is_current: Boolean(branch?.is_current),
+        commit_count: filteredDates.reduce((sum, item) => sum + Number(item.count || 0), 0),
+        dates: filteredDates,
+      };
+    })
+    .filter((branch) => {
+      if (filterKey === "all") {
+        return branch.name !== "";
+      }
+
+      return branch.name !== "" && branch.commit_count > 0;
+    });
+});
+
+const gitGraphPalette = [
+  "#5a8bc6",
+  "#d97706",
+  "#0f766e",
+  "#7c3aed",
+  "#be123c",
+  "#0e7490",
+  "#65a30d",
+  "#f97316",
+];
+
+const gitVisualGraph = computed(() => {
+  if (!isForgejoConnected.value || !history.value?.git?.tree_available) {
+    return {
+      ready: false,
+      branches: [],
+      nodes: [],
+      edges: [],
+      width: 0,
+      height: 0,
+      laneTop: 0,
+      laneBottom: 0,
+    };
+  }
+
+  const branchInput = filteredGitBranchTree.value;
+  if (!Array.isArray(branchInput) || branchInput.length === 0) {
+    return {
+      ready: false,
+      branches: [],
+      nodes: [],
+      edges: [],
+      width: 0,
+      height: 0,
+      laneTop: 0,
+      laneBottom: 0,
+    };
+  }
+
+  const branches = branchInput
+    .map((branch) => ({
+      name: String(branch?.name || "").trim(),
+      is_default: Boolean(branch?.is_default),
+      is_current: Boolean(branch?.is_current),
+      commit_count: Math.max(0, Number(branch?.commit_count || 0)),
+      dates: Array.isArray(branch?.dates) ? branch.dates : [],
+    }))
+    .filter((branch) => branch.name !== "")
+    .sort((left, right) => {
+      const leftPriority = (left.is_default ? 4 : 0) + (left.is_current ? 2 : 0);
+      const rightPriority = (right.is_default ? 4 : 0) + (right.is_current ? 2 : 0);
+      if (leftPriority !== rightPriority) {
+        return rightPriority - leftPriority;
+      }
+
+      if (left.commit_count !== right.commit_count) {
+        return right.commit_count - left.commit_count;
+      }
+
+      return left.name.localeCompare(right.name);
+    })
+    .map((branch, index) => ({
+      ...branch,
+      index,
+      color: gitGraphPalette[index % gitGraphPalette.length],
+    }));
+
+  if (branches.length === 0) {
+    return {
+      ready: false,
+      branches: [],
+      nodes: [],
+      edges: [],
+      width: 0,
+      height: 0,
+      laneTop: 0,
+      laneBottom: 0,
+    };
+  }
+
+  const perBranchCommitLimit = 48;
+  const totalNodeLimit = 260;
+  const rawNodes = [];
+
+  branches.forEach((branch) => {
+    const branchNodes = [];
+    const seenHashes = new Set();
+
+    branch.dates.forEach((dateGroup) => {
+      const commits = Array.isArray(dateGroup?.commits) ? dateGroup.commits : [];
+      commits.forEach((commit) => {
+        const hash = String(commit?.hash || "").trim();
+        if (!hash || seenHashes.has(hash)) {
+          return;
+        }
+        seenHashes.add(hash);
+
+        const authoredAt = String(commit?.authored_at || "").trim();
+        const timestamp = Date.parse(authoredAt);
+        const authoredTs = Number.isFinite(timestamp) ? timestamp : 0;
+        const parents = Array.isArray(commit?.parents)
+          ? commit.parents
+            .map((parent) => String(parent || "").trim())
+            .filter((parent) => parent !== "")
+          : [];
+        branchNodes.push({
+          id: `${branch.name}:${hash}`,
+          hash,
+          short_hash: String(commit?.short_hash || "").trim() || hash.slice(0, 7),
+          subject: String(commit?.subject || "").trim(),
+          author_name: String(commit?.author_name || "").trim(),
+          authored_at: authoredAt,
+          authored_ts: authoredTs,
+          parents,
+          lane_index: branch.index,
+          branch_name: branch.name,
+          branch_names: [branch.name],
+          color: branch.color,
+        });
+      });
+    });
+
+    branchNodes.sort((left, right) => {
+      if (left.authored_ts !== right.authored_ts) {
+        return right.authored_ts - left.authored_ts;
+      }
+
+      return left.hash.localeCompare(right.hash);
+    });
+
+    rawNodes.push(...branchNodes.slice(0, perBranchCommitLimit));
+  });
+
+  const nodes = rawNodes
+    .sort((left, right) => {
+      if (left.authored_ts !== right.authored_ts) {
+        return right.authored_ts - left.authored_ts;
+      }
+      if (left.lane_index !== right.lane_index) {
+        return left.lane_index - right.lane_index;
+      }
+      return left.hash.localeCompare(right.hash);
+    })
+    .slice(0, totalNodeLimit);
+
+  if (nodes.length === 0) {
+    return {
+      ready: false,
+      branches,
+      nodes: [],
+      edges: [],
+      width: 0,
+      height: 0,
+      laneTop: 0,
+      laneBottom: 0,
+    };
+  }
+
+  const laneGap = 92;
+  const rowGap = 44;
+  const padX = 44;
+  const padY = 24;
+  const width = Math.max(320, (padX * 2) + ((branches.length - 1) * laneGap) + 120);
+  const height = Math.max(220, (padY * 2) + ((nodes.length - 1) * rowGap) + 40);
+  const laneTop = padY - 12;
+  const laneBottom = height - 20;
+
+  const indexedNodes = nodes.map((node, rowIndex) => {
+    return {
+      ...node,
+      x: padX + (node.lane_index * laneGap),
+      y: padY + (rowIndex * rowGap),
+    };
+  });
+
+  const nodeById = new Map(indexedNodes.map((node) => [node.id, node]));
+  const nodesByHash = new Map();
+  indexedNodes.forEach((node) => {
+    if (!nodesByHash.has(node.hash)) {
+      nodesByHash.set(node.hash, []);
+    }
+    nodesByHash.get(node.hash).push(node);
+  });
+  nodesByHash.forEach((items) => {
+    items.sort((left, right) => left.y - right.y);
+  });
+
+  const edgeKeys = new Set();
+  const edges = [];
+
+  indexedNodes.forEach((node) => {
+    const parentHashes = Array.isArray(node.parents) ? node.parents : [];
+    parentHashes.forEach((parentHashRaw, parentIndex) => {
+      const parentHash = String(parentHashRaw || "").trim();
+      if (!parentHash) {
+        return;
+      }
+
+      let parent = nodeById.get(`${node.branch_name}:${parentHash}`) || null;
+      let dashed = false;
+      if (!parent) {
+        const candidates = Array.isArray(nodesByHash.get(parentHash)) ? nodesByHash.get(parentHash) : [];
+        if (candidates.length === 0) {
+          return;
+        }
+
+        const olderCandidates = candidates.filter((candidate) => candidate.y > node.y);
+        const pool = olderCandidates.length > 0 ? olderCandidates : candidates;
+        parent = pool
+          .slice()
+          .sort((left, right) => {
+            const leftLaneDistance = Math.abs(left.lane_index - node.lane_index);
+            const rightLaneDistance = Math.abs(right.lane_index - node.lane_index);
+            if (leftLaneDistance !== rightLaneDistance) {
+              return leftLaneDistance - rightLaneDistance;
+            }
+
+            const leftRowDistance = Math.abs(left.y - node.y);
+            const rightRowDistance = Math.abs(right.y - node.y);
+            if (leftRowDistance !== rightRowDistance) {
+              return leftRowDistance - rightRowDistance;
+            }
+
+            return left.id.localeCompare(right.id);
+          })[0] || null;
+        dashed = Boolean(parent) && parent.branch_name !== node.branch_name;
+      }
+
+      if (!parent) {
+        return;
+      }
+
+      const edgeKey = `${node.id}:${parent.id}:${parentIndex}`;
+      if (edgeKeys.has(edgeKey)) {
+        return;
+      }
+      edgeKeys.add(edgeKey);
+
+      if (Math.abs(node.x - parent.x) <= 1) {
+        edges.push({
+          key: edgeKey,
+          color: node.color,
+          dashed,
+          path: `M ${node.x} ${node.y} L ${parent.x} ${parent.y}`,
+        });
+        return;
+      }
+
+      const deltaY = parent.y - node.y;
+      const cp1y = node.y + (deltaY * 0.36);
+      const cp2y = node.y + (deltaY * 0.64);
+      edges.push({
+        key: edgeKey,
+        color: node.color,
+        dashed,
+        path: `M ${node.x} ${node.y} C ${node.x} ${cp1y}, ${parent.x} ${cp2y}, ${parent.x} ${parent.y}`,
+      });
+    });
+  });
+
+  return {
+    ready: true,
+    branches: branches.map((branch) => ({
+      ...branch,
+      x: padX + (branch.index * laneGap),
+    })),
+    nodes: indexedNodes,
+    edges,
+    width,
+    height,
+    laneTop,
+    laneBottom,
+  };
+});
+
+const gitGraphNodePreview = computed(() => {
+  if (!gitVisualGraph.value.ready) {
+    return [];
+  }
+
+  return gitVisualGraph.value.nodes.slice(0, 60);
 });
 
 const filteredGitCommits = computed(() => {
@@ -499,6 +952,71 @@ function resolveCommitContributorKey(commit) {
 
   const authorName = String(commit?.author_name || "unknown").trim().toLowerCase();
   return `external:${authorName || "unknown"}`;
+}
+
+function resolveGraphNodeBranchLabel(node) {
+  const labels = Array.isArray(node?.branch_names)
+    ? node.branch_names
+      .map((item) => String(item || "").trim())
+      .filter((item) => item !== "")
+    : [];
+
+  if (labels.length === 0) {
+    return "-";
+  }
+
+  if (labels.length <= 2) {
+    return labels.join(", ");
+  }
+
+  return `${labels.slice(0, 2).join(", ")} +${labels.length - 2}`;
+}
+
+function resolveGitNodeTooltipPosition(event) {
+  const host = gitGraphCanvasWrapRef.value;
+  if (!host) {
+    return { x: 10, y: 10 };
+  }
+
+  const rect = host.getBoundingClientRect();
+  const tooltipWidth = 290;
+  const tooltipHeight = 118;
+  const rawX = (Number(event?.clientX || rect.left) - rect.left) + host.scrollLeft + 12;
+  const rawY = (Number(event?.clientY || rect.top) - rect.top) + host.scrollTop + 12;
+  const maxX = Math.max(10, host.scrollWidth - tooltipWidth - 10);
+  const maxY = Math.max(10, host.scrollHeight - tooltipHeight - 10);
+
+  return {
+    x: Math.min(Math.max(10, Math.round(rawX)), maxX),
+    y: Math.min(Math.max(10, Math.round(rawY)), maxY),
+  };
+}
+
+function showGitNodeTooltip(event, node) {
+  if (!node) {
+    return;
+  }
+
+  const position = resolveGitNodeTooltipPosition(event);
+  gitNodeTooltip.visible = true;
+  gitNodeTooltip.x = position.x;
+  gitNodeTooltip.y = position.y;
+  gitNodeTooltip.node = node;
+}
+
+function moveGitNodeTooltip(event) {
+  if (!gitNodeTooltip.visible || !gitNodeTooltip.node) {
+    return;
+  }
+
+  const position = resolveGitNodeTooltipPosition(event);
+  gitNodeTooltip.x = position.x;
+  gitNodeTooltip.y = position.y;
+}
+
+function hideGitNodeTooltip() {
+  gitNodeTooltip.visible = false;
+  gitNodeTooltip.node = null;
 }
 
 function syncSettingsForm() {

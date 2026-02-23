@@ -19,4 +19,4 @@ Broadcast::channel('project.{projectId}', function ($user, $projectId) {
         ->where('project_id', $projectId)
         ->where('user_id', $user->user_id)
         ->exists();
-});
+}, ['guards' => ['sanctum']]);

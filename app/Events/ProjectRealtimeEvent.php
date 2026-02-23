@@ -12,7 +12,9 @@ class ProjectRealtimeEvent implements ShouldBroadcastNow
     use Dispatchable, SerializesModels;
 
     public int $projectId;
+
     public int $userId;
+
     public string $name;
 
     /**

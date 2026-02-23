@@ -17,7 +17,7 @@
     <aside class="card info-card">
       <h2>{{ t("home.whatsInsideTitle") }}</h2>
       <ul class="plain-list">
-        <li>{{ t("home.featureRealtime") }}</li>
+        <li>{{ t("home.featureEditor") }}</li>
         <li>{{ t("home.featureTerminal") }}</li>
         <li>{{ t("home.featureGit") }}</li>
       </ul>

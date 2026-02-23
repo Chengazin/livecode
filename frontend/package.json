@@ -9,15 +9,15 @@
     "lint": "vue-cli-service lint"
   },
   "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "ace-builds": "^1.43.6",
     "core-js": "^3.8.3",
     "laravel-echo": "^2.3.0",
     "pusher-js": "^8.4.0",
     "vue": "^3.2.13",
     "vue-i18n": "^9.14.5",
-    "vue-router": "^4.6.4",
-    "@xterm/addon-fit": "^0.11.0",
-    "@xterm/xterm": "^6.0.0"
+    "vue-router": "^4.6.4"
   },
   "devDependencies": {
     "@babel/core": "^7.12.16",
@@ -38,7 +38,8 @@
       "eslint:recommended"
     ],
     "parserOptions": {
-      "parser": "@babel/eslint-parser"
+      "parser": "@babel/eslint-parser",
+      "requireConfigFile": false
     },
     "rules": {}
   },

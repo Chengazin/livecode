@@ -23,7 +23,7 @@ class ProjectParticipantController extends Controller
         $perPage = min((int) $request->query('per_page', 50), 200);
         $query = ProjectParticipant::query()
             ->with([
-                'user:user_id,name,email',
+                'user:user_id,name,email,avatar_type,avatar_preset,avatar_path',
             ])
             ->whereHas('project', function ($projectQuery) use ($user) {
                 $projectQuery
@@ -59,7 +59,7 @@ class ProjectParticipantController extends Controller
             return response()->json(['message' => 'Access denied.'], 403);
         }
 
-        return $participant->loadMissing('user:user_id,name,email');
+        return $participant->loadMissing('user:user_id,name,email,avatar_type,avatar_preset,avatar_path');
     }
 
     public function store(Request $request, ProjectAccessService $access)
@@ -113,7 +113,7 @@ class ProjectParticipantController extends Controller
         );
 
         return response()->json(
-            $participant->loadMissing('user:user_id,name,email'),
+            $participant->loadMissing('user:user_id,name,email,avatar_type,avatar_preset,avatar_path'),
             201
         );
     }
@@ -155,7 +155,7 @@ class ProjectParticipantController extends Controller
         $participant->fill($data);
         $participant->save();
 
-        return $participant->loadMissing('user:user_id,name,email');
+        return $participant->loadMissing('user:user_id,name,email,avatar_type,avatar_preset,avatar_path');
     }
 
     public function destroy(Request $request, int $participantId, ProjectAccessService $access)

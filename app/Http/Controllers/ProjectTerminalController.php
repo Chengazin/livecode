@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Events\ProjectRealtimeEvent;
 use App\Models\Project;
 use App\Services\ProjectAccessService;
 use App\Services\ProjectTerminalService;
@@ -75,13 +74,6 @@ class ProjectTerminalController extends Controller
         } catch (InvalidArgumentException $exception) {
             return $this->terminalExceptionToResponse($exception);
         }
-
-        $this->broadcastSafely(new ProjectRealtimeEvent(
-            $project->project_id,
-            (int) $user->user_id,
-            'realtime.terminal.session.updated',
-            ['session' => $this->serializeSession($session)]
-        ));
 
         return response()->json([
             'status' => 'ok',
@@ -164,13 +156,6 @@ class ProjectTerminalController extends Controller
             return $this->terminalExceptionToResponse($exception);
         }
 
-        $this->broadcastSafely(new ProjectRealtimeEvent(
-            $project->project_id,
-            (int) $user->user_id,
-            'realtime.terminal.session.updated',
-            ['session' => $this->serializeSession($closed)]
-        ));
-
         return response()->json([
             'status' => 'ok',
             'session' => $this->serializeSession($closed),
@@ -211,13 +196,6 @@ class ProjectTerminalController extends Controller
         }
 
         $closed = $terminal->closeSessionFromGateway($session, $data);
-
-        $this->broadcastSafely(new ProjectRealtimeEvent(
-            (int) $closed->project_id,
-            (int) $closed->user_id,
-            'realtime.terminal.session.updated',
-            ['session' => $this->serializeSession($closed)]
-        ));
 
         return response()->json([
             'status' => 'ok',
@@ -267,15 +245,6 @@ class ProjectTerminalController extends Controller
             'invalid_project_root' => response()->json(['message' => 'Invalid project root.'], 500),
             default => throw $exception,
         };
-    }
-
-    private function broadcastSafely(object $event): void
-    {
-        try {
-            event($event);
-        } catch (\Throwable) {
-            // Broadcast availability should not break API write paths.
-        }
     }
 
     private function terminalEnabled(): bool

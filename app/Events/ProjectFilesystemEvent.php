@@ -12,8 +12,11 @@ class ProjectFilesystemEvent implements ShouldBroadcastNow
     use Dispatchable, SerializesModels;
 
     public int $projectId;
+
     public int $userId;
+
     public string $event;
+
     public string $path;
 
     public function __construct(int $projectId, int $userId, string $event, string $path)
@@ -40,6 +43,7 @@ class ProjectFilesystemEvent implements ShouldBroadcastNow
             'event' => $this->event,
             'path' => $this->path,
             'user_id' => $this->userId,
+            'project_id' => $this->projectId,
         ];
     }
 }

@@ -17,16 +17,15 @@ use App\Http\Controllers\ProjectRealtimeController;
 use App\Http\Controllers\ProjectTerminalController;
 use App\Http\Controllers\ProjectSnapshotController;
 use App\Http\Controllers\ProjectFilesystemController;
+use App\Http\Controllers\ProjectCodeCommentController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\UserController;
-use Illuminate\Broadcasting\BroadcastController;
 use Illuminate\Support\Facades\Route;
 
 Route::post('/auth/register', [AuthController::class, 'register'])->middleware('throttle:auth-register');
 Route::post('/auth/login', [AuthController::class, 'login'])->middleware('throttle:auth-login');
 Route::post('/forgejo/oauth/start', [ForgejoAuthController::class, 'start'])->middleware('throttle:oauth-start');
 Route::get('/forgejo/oauth/callback', [ForgejoAuthController::class, 'callback']);
-Route::post('/broadcasting/auth', [BroadcastController::class, 'authenticate'])->middleware('auth:sanctum');
 Route::post('/terminal/gateway/sessions/{terminalSessionId}/close', [ProjectTerminalController::class, 'gatewayClose']);
 
 Route::middleware('auth:sanctum')->get('/me', [ProfileController::class, 'show']);
@@ -58,6 +57,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('projects/{projectId}/realtime/chat', [ProjectRealtimeController::class, 'chatStore']);
     Route::post('projects/{projectId}/realtime/editor-state', [ProjectRealtimeController::class, 'editorState']);
     Route::post('projects/{projectId}/realtime/editor-sync', [ProjectRealtimeController::class, 'editorSync']);
+    Route::get('projects/{projectId}/code-comments', [ProjectCodeCommentController::class, 'index']);
+    Route::post('projects/{projectId}/code-comments', [ProjectCodeCommentController::class, 'store']);
+    Route::delete('projects/{projectId}/code-comments/{commentId}', [ProjectCodeCommentController::class, 'destroy']);
     Route::get('projects/{projectId}/terminal/sessions', [ProjectTerminalController::class, 'index']);
     Route::post('projects/{projectId}/terminal/sessions', [ProjectTerminalController::class, 'store']);
     Route::post('projects/{projectId}/terminal/sessions/{terminalSessionId}/ticket', [ProjectTerminalController::class, 'ticket']);

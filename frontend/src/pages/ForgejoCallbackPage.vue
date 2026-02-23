@@ -17,7 +17,7 @@ import { onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { request } from "../services/api";
-import { saveSession } from "../services/auth";
+import { saveSession, setUser } from "../services/auth";
 
 const route = useRoute();
 const router = useRouter();
@@ -93,6 +93,9 @@ onMounted(async () => {
     }
 
     if (response.data?.status === "connected") {
+      if (response.data?.user && typeof response.data.user === "object") {
+        setUser(response.data.user);
+      }
       statusMessage.value = t("callback.connected");
       setTimeout(() => {
         router.push(withForgejoConnected(returnPath));

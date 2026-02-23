@@ -100,6 +100,138 @@ class ProjectGitService
         return $commits;
     }
 
+    /**
+     * @return list<array{
+     *   name: string,
+     *   ref_name?: string,
+     *   is_current: bool,
+     *   head_hash: string,
+     *   last_commit_at: string|null
+     * }>
+     */
+    public function listBranches(string $path, int $limit = 50): array
+    {
+        $limit = max(1, min($limit, 200));
+        $git = $this->gitBinary();
+
+        $output = trim($this->run([
+            $git,
+            'for-each-ref',
+            '--sort=-committerdate',
+            '--format=%(refname)%x1f%(refname:short)%x1f%(HEAD)%x1f%(objectname)%x1f%(committerdate:iso-strict)',
+            'refs/heads',
+            'refs/remotes',
+        ], $path));
+
+        if ($output === '') {
+            return [];
+        }
+
+        $branchesByName = [];
+        $lines = preg_split('/\R/u', $output, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        foreach ($lines as $line) {
+            $parts = explode("\x1f", (string) $line);
+            if (count($parts) < 5) {
+                continue;
+            }
+
+            $fullRef = trim((string) $parts[0]);
+            $shortName = trim((string) $parts[1]);
+            if ($fullRef === '' || $shortName === '') {
+                continue;
+            }
+
+            $isRemoteRef = str_starts_with($fullRef, 'refs/remotes/');
+            if ($isRemoteRef && str_ends_with($shortName, '/HEAD')) {
+                continue;
+            }
+
+            $name = $shortName;
+            if ($isRemoteRef && str_contains($shortName, '/')) {
+                $slashPos = strpos($shortName, '/');
+                if ($slashPos !== false) {
+                    $name = substr($shortName, $slashPos + 1);
+                }
+            }
+
+            if ($name === '') {
+                continue;
+            }
+
+            $priority = $isRemoteRef ? 1 : 2;
+            $isCurrent = ! $isRemoteRef && trim((string) $parts[2]) === '*';
+            $headHash = trim((string) $parts[3]);
+            $lastCommitAtRaw = trim((string) $parts[4]);
+            $lastCommitAt = $lastCommitAtRaw !== '' ? $lastCommitAtRaw : null;
+            $refName = $shortName;
+            $next = [
+                'name' => $name,
+                'ref_name' => $refName,
+                'is_current' => $isCurrent,
+                'head_hash' => $headHash,
+                'last_commit_at' => $lastCommitAt,
+                '_priority' => $priority,
+            ];
+
+            if (! isset($branchesByName[$name])) {
+                $branchesByName[$name] = $next;
+                continue;
+            }
+
+            $existing = $branchesByName[$name];
+            $existingPriority = (int) ($existing['_priority'] ?? 0);
+            if ($priority > $existingPriority) {
+                $branchesByName[$name] = $next;
+                continue;
+            }
+
+            if ($priority < $existingPriority) {
+                continue;
+            }
+
+            $existingDate = (string) ($existing['last_commit_at'] ?? '');
+            $nextDate = (string) ($next['last_commit_at'] ?? '');
+            if ($nextDate > $existingDate) {
+                $branchesByName[$name] = $next;
+            }
+        }
+
+        if (count($branchesByName) === 0) {
+            return [];
+        }
+
+        $branches = array_values($branchesByName);
+        usort($branches, function (array $left, array $right): int {
+            if ((bool) ($left['is_current'] ?? false) !== (bool) ($right['is_current'] ?? false)) {
+                return ((bool) ($right['is_current'] ?? false)) <=> ((bool) ($left['is_current'] ?? false));
+            }
+
+            $leftDate = (string) ($left['last_commit_at'] ?? '');
+            $rightDate = (string) ($right['last_commit_at'] ?? '');
+            if ($leftDate !== $rightDate) {
+                return strcmp($rightDate, $leftDate);
+            }
+
+            return strcmp((string) ($left['name'] ?? ''), (string) ($right['name'] ?? ''));
+        });
+
+        $result = [];
+        foreach ($branches as $branch) {
+            $result[] = [
+                'name' => (string) ($branch['name'] ?? ''),
+                'ref_name' => (string) ($branch['ref_name'] ?? $branch['name'] ?? ''),
+                'is_current' => (bool) ($branch['is_current'] ?? false),
+                'head_hash' => (string) ($branch['head_hash'] ?? ''),
+                'last_commit_at' => $branch['last_commit_at'] !== null ? (string) $branch['last_commit_at'] : null,
+            ];
+            if (count($result) >= $limit) {
+                break;
+            }
+        }
+
+        return $result;
+    }
+
     public function hasChanges(string $path): bool
     {
         $status = trim($this->run([$this->gitBinary(), 'status', '--porcelain'], $path));
