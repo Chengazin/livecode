@@ -1572,10 +1572,6 @@ select:focus {
   background: #5a8bc6;
 }
 
-.project-info-timeline-bar--snapshots {
-  background: #8dbf7a;
-}
-
 .project-info-timeline-item small {
   font-size: 10px;
   color: var(--text-muted);
@@ -1603,10 +1599,6 @@ select:focus {
 
 .project-info-legend-dot--commits {
   background: #5a8bc6;
-}
-
-.project-info-legend-dot--snapshots {
-  background: #8dbf7a;
 }
 
 .project-info-history-filters {
@@ -1658,6 +1650,18 @@ select:focus {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.project-info-git-tree-branch-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.project-info-git-tree-branch-title small {
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
 .project-info-git-tree-branch-badges {
@@ -1712,6 +1716,7 @@ select:focus {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  appearance: none;
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--surface);
@@ -1719,6 +1724,19 @@ select:focus {
   font-size: 11px;
   color: var(--text-muted);
   white-space: nowrap;
+  cursor: pointer;
+  font: inherit;
+  transition: opacity 0.18s ease, border-color 0.18s ease, background-color 0.18s ease, color 0.18s ease;
+}
+
+.project-info-git-graph-legend-item.is-active {
+  border-color: var(--notice-border);
+  background: var(--notice-bg);
+  color: var(--text-primary);
+}
+
+.project-info-git-graph-legend-item.is-dimmed {
+  opacity: 0.58;
 }
 
 .project-info-git-graph-legend-item code {
@@ -1739,42 +1757,47 @@ select:focus {
 
 .project-info-git-graph-canvas-wrap {
   position: relative;
+  display: flex;
+  justify-content: center;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: linear-gradient(180deg, #f8fbff, #edf3fb);
   overflow: auto;
-  padding: 6px;
+  padding: 8px 6px;
 }
 
 .project-info-git-graph-canvas {
   display: block;
-  width: 100%;
-  min-width: 340px;
-  min-height: 220px;
+  max-width: 100%;
+  min-width: 580px;
+  min-height: 180px;
+  height: auto;
+  margin: 0 auto;
+  flex: 0 0 auto;
 }
 
 .project-info-git-graph-lane {
-  stroke-width: 1.8;
+  stroke-width: 1.6;
   stroke-linecap: round;
   opacity: 0.42;
 }
 
 .project-info-git-graph-edge {
   fill: none;
-  stroke-width: 2;
+  stroke-width: 1.8;
   stroke-linecap: round;
   stroke-linejoin: round;
   opacity: 0.9;
 }
 
 .project-info-git-graph-edge.is-cross-branch {
-  stroke-dasharray: 5 4;
+  stroke-dasharray: 4 3;
   opacity: 0.68;
 }
 
 .project-info-git-graph-node {
   stroke: #ffffff;
-  stroke-width: 1.4;
+  stroke-width: 1.2;
 }
 
 .project-info-git-graph-node-core {
@@ -1870,7 +1893,17 @@ select:focus {
   gap: 12px;
 }
 
+.project-info-history-single {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .project-info-history-grid h3 {
+  margin: 0 0 6px;
+}
+
+.project-info-history-single h3 {
   margin: 0 0 6px;
 }
 
@@ -1888,6 +1921,25 @@ select:focus {
   display: flex;
   flex-direction: column;
   gap: 3px;
+}
+
+.project-info-history-row-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.project-info-history-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.project-info-history-row-actions .btn {
+  white-space: nowrap;
 }
 
 .project-info-history-row:last-child {
@@ -3229,6 +3281,12 @@ select:focus {
   background: #132339;
 }
 
+[data-theme="dark"] .project-info-git-graph-legend-item.is-active {
+  border-color: #4a6891;
+  background: #1a314d;
+  color: #f4f8ff;
+}
+
 [data-theme="dark"] .project-info-git-graph-canvas-wrap {
   border-color: #314661;
   background: linear-gradient(180deg, #0f1e31, #132339);
@@ -3287,11 +3345,6 @@ select:focus {
 [data-theme="dark"] .project-info-timeline-bar--commits,
 [data-theme="dark"] .project-info-legend-dot--commits {
   background: #7aa4d8;
-}
-
-[data-theme="dark"] .project-info-timeline-bar--snapshots,
-[data-theme="dark"] .project-info-legend-dot--snapshots {
-  background: #9bcf88;
 }
 
 [data-theme="dark"] * {
@@ -3634,7 +3687,7 @@ select:focus {
   }
 
   .project-info-git-graph-canvas {
-    min-width: 300px;
+    min-width: 260px;
   }
 
   .project-info-git-graph-node-rows {

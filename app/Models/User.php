@@ -101,11 +101,6 @@ class User extends Authenticatable
         return $this->hasMany(ProjectInvitation::class, 'inviter_user_id', 'user_id');
     }
 
-    public function snapshotsAuthored(): HasMany
-    {
-        return $this->hasMany(ProjectSnapshot::class, 'author_user_id', 'user_id');
-    }
-
     public function admin(): HasOne
     {
         return $this->hasOne(Admin::class, 'user_id', 'user_id');

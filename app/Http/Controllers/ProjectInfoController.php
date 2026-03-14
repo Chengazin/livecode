@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 
 use App\Models\Project;
 use App\Models\ProjectParticipant;
-use App\Models\ProjectSnapshot;
 use App\Services\ProjectAccessService;
 use App\Services\ProjectGitService;
 use Carbon\CarbonImmutable;
@@ -39,7 +38,6 @@ class ProjectInfoController extends Controller
 
         $periodDays = $this->resolveIntQuery($request->query('period_days'), 30, 1, 365);
         $commitLimit = $this->resolveIntQuery($request->query('commit_limit'), 200, 1, 500);
-        $snapshotLimit = $this->resolveIntQuery($request->query('snapshot_limit'), 80, 1, 500);
 
         $participants = ProjectParticipant::query()
             ->where('project_id', $project->project_id)
@@ -64,12 +62,14 @@ class ProjectInfoController extends Controller
         $commits = [];
         $gitError = '';
         $gitAvailable = false;
+        $gitHasChanges = false;
         $gitTree = [];
         $gitTreeError = '';
         $gitBranches = [];
         $repoPath = Storage::disk('local')->path($project->project_path);
         if ($git->isRepository($repoPath)) {
             try {
+                $gitHasChanges = $git->hasChanges($repoPath);
                 $commits = $git->listCommits($repoPath, $commitLimit, $defaultBranch);
                 $commits = $this->enrichCommitsWithKnownContributors($commits, $knownContributors['byEmail']);
                 $gitAvailable = true;
@@ -82,16 +82,22 @@ class ProjectInfoController extends Controller
             }
         }
 
-        $snapshots = ProjectSnapshot::query()
-            ->where('project_id', $project->project_id)
-            ->with([
-                'author:user_id,name,email',
-            ])
-            ->orderByDesc('created_at')
-            ->limit($snapshotLimit)
-            ->get();
+        if ($gitAvailable) {
+            if ($repoConfigured) {
+                $cloneUrl = trim((string) ($project->forgejo_repo_clone_url ?? ''));
+                if ($cloneUrl !== '') {
+                    try {
+                        $git->fetchRemoteBranches(
+                            $repoPath,
+                            $cloneUrl,
+                            $user->forgejo_access_token ?: null
+                        );
+                    } catch (RuntimeException) {
+                        // Fall back to local refs if remote fetch is unavailable.
+                    }
+                }
+            }
 
-        if ($repoConfigured && $gitAvailable) {
             try {
                 $branchLimit = 24;
                 $branches = $git->listBranches($repoPath, $branchLimit);
@@ -100,6 +106,7 @@ class ProjectInfoController extends Controller
 
                     return [
                         'name' => $name,
+                        'ref_name' => (string) ($branch['ref_name'] ?? $name),
                         'is_current' => (bool) ($branch['is_current'] ?? false),
                         'is_default' => $name !== '' && $name === $defaultBranch,
                         'head_hash' => (string) ($branch['head_hash'] ?? ''),
@@ -171,8 +178,6 @@ class ProjectInfoController extends Controller
             })->values(),
             'roles' => ProjectParticipant::roles(),
             'stats' => $this->buildStats(
-                $project,
-                $knownContributors['byUserId'],
                 $knownContributors['byEmail'],
                 $commits,
                 $periodDays
@@ -183,34 +188,19 @@ class ProjectInfoController extends Controller
                     'repo_connected' => $repoConfigured,
                     'default_branch' => $defaultBranch,
                     'commit_count' => count($commits),
+                    'has_changes' => $gitHasChanges,
                     'error' => $gitError,
                     'commits' => $commits,
                     'branches' => $gitBranches,
-                    'tree_available' => $repoConfigured && $gitAvailable,
+                    'tree_available' => $gitAvailable,
                     'tree_error' => $gitTreeError,
                     'branch_tree' => $gitTree,
                 ],
-                'snapshots' => $snapshots->map(function (ProjectSnapshot $snapshot): array {
-                    return [
-                        'snapshot_id' => (int) $snapshot->snapshot_id,
-                        'snapshot_hash' => (string) $snapshot->snapshot_hash,
-                        'message' => (string) ($snapshot->message ?? ''),
-                        'snapshot_path' => (string) $snapshot->snapshot_path,
-                        'size_bytes' => $snapshot->size_bytes !== null ? (int) $snapshot->size_bytes : null,
-                        'created_at' => $snapshot->created_at?->toIso8601String(),
-                        'author' => $snapshot->author ? [
-                            'user_id' => (int) $snapshot->author->user_id,
-                            'name' => (string) $snapshot->author->name,
-                            'email' => (string) $snapshot->author->email,
-                        ] : null,
-                    ];
-                })->values(),
             ],
         ]);
     }
 
     /**
-     * @param array<int, array{user_id: int, name: string, email: string, role: string}> $knownByUserId
      * @param array<string, array{user_id: int, name: string, email: string, role: string}> $knownByEmail
      * @param list<array{
      *   hash: string,
@@ -229,12 +219,10 @@ class ProjectInfoController extends Controller
      *   period_days: int,
      *   from: string,
      *   to: string,
-      *   total_commits: int,
-      *   total_snapshots: int,
+     *   total_commits: int,
      *   timeline: list<array{
      *     date: string,
      *     commits: int,
-     *     snapshots: int,
      *     total: int
      *   }>,
      *   contributors: list<array{
@@ -244,14 +232,11 @@ class ProjectInfoController extends Controller
      *     email: string,
      *     role: string,
      *     commit_count: int,
-     *     snapshot_count: int,
      *     last_activity_at: string|null
      *   }>
      * }
      */
     private function buildStats(
-        Project $project,
-        array $knownByUserId,
         array $knownByEmail,
         array $commits,
         int $periodDays
@@ -267,7 +252,6 @@ class ProjectInfoController extends Controller
             $timelineByDate[$dayKey] = [
                 'date' => $dayKey,
                 'commits' => 0,
-                'snapshots' => 0,
                 'total' => 0,
             ];
             $cursor = $cursor->addDay();
@@ -297,7 +281,6 @@ class ProjectInfoController extends Controller
                     'email' => $known['email'] ?? (string) ($commit['author_email'] ?? ''),
                     'role' => $known['role'] ?? 'external',
                     'commit_count' => 0,
-                    'snapshot_count' => 0,
                     'last_activity_at' => null,
                 ];
             }
@@ -313,91 +296,20 @@ class ProjectInfoController extends Controller
                 $timelineByDate[$dayKey] = [
                     'date' => $dayKey,
                     'commits' => 0,
-                    'snapshots' => 0,
                     'total' => 0,
                 ];
             }
             $timelineByDate[$dayKey]['commits']++;
         }
 
-        $snapshotRows = ProjectSnapshot::query()
-            ->selectRaw('author_user_id, COUNT(*) as snapshot_count, COALESCE(SUM(size_bytes), 0) as total_size_bytes, MAX(created_at) as last_snapshot_at')
-            ->where('project_id', $project->project_id)
-            ->whereNotNull('author_user_id')
-            ->where('created_at', '>=', $from->toDateTimeString())
-            ->groupBy('author_user_id')
-            ->get();
-        $snapshotTimelineRows = ProjectSnapshot::query()
-            ->selectRaw('DATE(created_at) as day, COUNT(*) as snapshot_count')
-            ->where('project_id', $project->project_id)
-            ->where('created_at', '>=', $from->toDateTimeString())
-            ->groupBy('day')
-            ->get();
-
-        $totalSnapshots = 0;
-        foreach ($snapshotRows as $row) {
-            $userId = (int) ($row->author_user_id ?? 0);
-            if ($userId <= 0) {
-                continue;
-            }
-
-            $snapshotCount = (int) ($row->snapshot_count ?? 0);
-            $totalSnapshots += $snapshotCount;
-
-            $known = $knownByUserId[$userId] ?? [
-                'user_id' => $userId,
-                'name' => 'User #'.$userId,
-                'email' => '',
-                'role' => ProjectParticipant::ROLE_DEVELOPER,
-            ];
-            $key = 'user:'.$userId;
-
-            if (! isset($contributors[$key])) {
-                $contributors[$key] = [
-                    'key' => $key,
-                    'user_id' => $known['user_id'],
-                    'name' => $known['name'],
-                    'email' => $known['email'],
-                    'role' => $known['role'],
-                    'commit_count' => 0,
-                    'snapshot_count' => 0,
-                    'last_activity_at' => null,
-                ];
-            }
-
-            $contributors[$key]['snapshot_count'] += $snapshotCount;
-            $contributors[$key]['last_activity_at'] = $this->maxIsoDate(
-                $contributors[$key]['last_activity_at'],
-                $this->safeParseIsoDate((string) ($row->last_snapshot_at ?? ''))?->toIso8601String()
-            );
-        }
-
-        foreach ($snapshotTimelineRows as $row) {
-            $dayKey = trim((string) ($row->day ?? ''));
-            if ($dayKey === '') {
-                continue;
-            }
-
-            if (! isset($timelineByDate[$dayKey])) {
-                $timelineByDate[$dayKey] = [
-                    'date' => $dayKey,
-                    'commits' => 0,
-                    'snapshots' => 0,
-                    'total' => 0,
-                ];
-            }
-
-            $timelineByDate[$dayKey]['snapshots'] += (int) ($row->snapshot_count ?? 0);
-        }
-
         $contributors = array_values(array_filter(
             $contributors,
-            fn (array $item): bool => ((int) $item['commit_count'] + (int) $item['snapshot_count']) > 0
+            fn (array $item): bool => (int) $item['commit_count'] > 0
         ));
 
         usort($contributors, function (array $left, array $right): int {
-            $leftScore = (int) $left['commit_count'] + (int) $left['snapshot_count'];
-            $rightScore = (int) $right['commit_count'] + (int) $right['snapshot_count'];
+            $leftScore = (int) $left['commit_count'];
+            $rightScore = (int) $right['commit_count'];
 
             if ($leftScore !== $rightScore) {
                 return $rightScore <=> $leftScore;
@@ -411,7 +323,7 @@ class ProjectInfoController extends Controller
 
         ksort($timelineByDate);
         $timeline = array_values(array_map(function (array $point): array {
-            $point['total'] = (int) $point['commits'] + (int) $point['snapshots'];
+            $point['total'] = (int) $point['commits'];
 
             return $point;
         }, $timelineByDate));
@@ -421,7 +333,6 @@ class ProjectInfoController extends Controller
             'from' => $from->toIso8601String(),
             'to' => $now->toIso8601String(),
             'total_commits' => $totalCommits,
-            'total_snapshots' => $totalSnapshots,
             'timeline' => $timeline,
             'contributors' => $contributors,
         ];

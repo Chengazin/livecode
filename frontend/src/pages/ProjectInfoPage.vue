@@ -171,20 +171,18 @@
           </label>
         </div>
         <p class="muted-text">
-          {{ t("projectInfo.statsSummary", { commits: stats.total_commits, snapshots: stats.total_snapshots }) }}
+          {{ t("projectInfo.statsSummary", { commits: stats.total_commits }) }}
         </p>
         <div v-if="statsTimeline.length > 0" class="project-info-timeline">
           <div v-for="point in statsTimeline" :key="point.date" class="project-info-timeline-item">
             <div class="project-info-timeline-bars">
               <span class="project-info-timeline-bar project-info-timeline-bar--commits" :style="{ height: `${point.commitsHeight}%` }" />
-              <span class="project-info-timeline-bar project-info-timeline-bar--snapshots" :style="{ height: `${point.snapshotsHeight}%` }" />
             </div>
             <small>{{ formatShortDate(point.date) }}</small>
           </div>
         </div>
         <p v-if="statsTimeline.length > 0" class="muted-text project-info-timeline-legend">
           <span><i class="project-info-legend-dot project-info-legend-dot--commits" />{{ t("projectInfo.legendCommits") }}</span>
-          <span><i class="project-info-legend-dot project-info-legend-dot--snapshots" />{{ t("projectInfo.legendSnapshots") }}</span>
         </p>
         <div v-if="stats.contributors.length === 0" class="muted-text">{{ t("projectInfo.noStats") }}</div>
         <div v-else class="project-info-stats-table">
@@ -195,7 +193,6 @@
             </div>
             <div class="project-info-stats-values">
               <span>{{ t("projectInfo.commitCount", { count: entry.commit_count }) }}</span>
-              <span>{{ t("projectInfo.snapshotCount", { count: entry.snapshot_count }) }}</span>
               <span v-if="entry.last_activity_at">{{ formatDateTime(entry.last_activity_at) }}</span>
             </div>
           </div>
@@ -216,116 +213,210 @@
           </label>
         </div>
 
-        <div class="project-info-history-grid">
+        <div class="project-info-history-single">
           <div>
             <h3>{{ t("projectInfo.gitHistoryTitle") }}</h3>
             <p v-if="history.git?.error" class="muted-text">{{ history.git.error }}</p>
             <p v-else-if="!history.git?.available" class="muted-text">{{ t("projectInfo.gitHistoryUnavailable") }}</p>
             <template v-else>
-              <div v-if="isForgejoConnected" class="project-info-git-tree-shell">
-                <h4>{{ t("projectInfo.gitGraphTitle") }}</h4>
-                <p class="muted-text">{{ t("projectInfo.gitGraphHint") }}</p>
-                <p v-if="history.git?.tree_error" class="muted-text">{{ history.git.tree_error }}</p>
-                <p v-else-if="!history.git?.tree_available" class="muted-text">{{ t("projectInfo.gitTreeUnavailable") }}</p>
-                <p v-else-if="!gitVisualGraph.ready" class="muted-text">{{ t("projectInfo.gitGraphEmpty") }}</p>
-                <div v-else class="project-info-git-graph-root">
-                  <div class="project-info-git-graph-legend">
-                    <div
-                      v-for="branch in gitVisualGraph.branches"
-                      :key="`graph-branch-${branch.name}`"
-                      class="project-info-git-graph-legend-item"
+              <div class="project-info-git-tree-shell">
+                <div>
+                  <h4>{{ t("projectInfo.gitTreeTitle") }}</h4>
+                  <p class="muted-text">{{ t("projectInfo.gitTreeHint") }}</p>
+                  <p v-if="gitWorktreeDirty && canMutateGitState" class="muted-text">{{ t("projectInfo.gitActionDirtyHint") }}</p>
+                  <p v-if="history.git?.tree_error" class="muted-text">{{ history.git.tree_error }}</p>
+                  <p v-else-if="!history.git?.tree_available" class="muted-text">{{ t("projectInfo.gitTreeUnavailable") }}</p>
+                  <p v-else-if="filteredGitBranchTree.length === 0" class="muted-text">{{ t("projectInfo.gitTreeEmpty") }}</p>
+                  <div v-else class="project-info-git-tree-root">
+                    <details
+                      v-for="branch in filteredGitBranchTree"
+                      :key="`tree-branch-${branch.name}`"
+                      class="project-info-git-tree-branch"
+                      :open="branch.is_current || branch.is_default"
                     >
-                      <i class="project-info-git-graph-legend-color" :style="{ background: branch.color }" />
-                      <code>{{ branch.name }}</code>
-                      <small v-if="branch.is_default">{{ t("projectInfo.gitGraphRoot") }}</small>
-                      <small v-if="branch.is_current">{{ t("projectInfo.gitTreeCurrent") }}</small>
-                    </div>
-                  </div>
-
-                  <div
-                    ref="gitGraphCanvasWrapRef"
-                    class="project-info-git-graph-canvas-wrap"
-                    @mouseleave="hideGitNodeTooltip"
-                  >
-                    <svg
-                      class="project-info-git-graph-canvas"
-                      :viewBox="`0 0 ${gitVisualGraph.width} ${gitVisualGraph.height}`"
-                      preserveAspectRatio="xMinYMin meet"
-                      role="img"
-                      :aria-label="t('projectInfo.gitGraphTitle')"
-                    >
-                      <g class="project-info-git-graph-lanes">
-                        <line
-                          v-for="branch in gitVisualGraph.branches"
-                          :key="`graph-lane-${branch.name}`"
-                          class="project-info-git-graph-lane"
-                          :x1="branch.x"
-                          :y1="gitVisualGraph.laneTop"
-                          :x2="branch.x"
-                          :y2="gitVisualGraph.laneBottom"
-                          :style="{ stroke: branch.color }"
-                        />
-                      </g>
-
-                      <g class="project-info-git-graph-edges">
-                        <path
-                          v-for="edge in gitVisualGraph.edges"
-                          :key="edge.key"
-                          class="project-info-git-graph-edge"
-                          :class="{ 'is-cross-branch': edge.dashed }"
-                          :d="edge.path"
-                          :style="{ stroke: edge.color }"
-                        />
-                      </g>
-
-                      <g class="project-info-git-graph-nodes">
-                        <g
-                          v-for="node in gitVisualGraph.nodes"
-                          :key="`graph-node-${node.id}`"
-                          :transform="`translate(${node.x} ${node.y})`"
-                          @mouseenter="showGitNodeTooltip($event, node)"
-                          @mousemove="moveGitNodeTooltip($event)"
-                          @mouseleave="hideGitNodeTooltip"
-                        >
-                          <circle
-                            class="project-info-git-graph-node"
-                            r="5"
-                            :style="{ fill: node.color }"
-                          />
-                          <circle class="project-info-git-graph-node-core" r="2" />
-                          <title>{{ `${node.short_hash} | ${node.subject} | ${formatDateTime(node.authored_at)}` }}</title>
-                        </g>
-                      </g>
-                    </svg>
-
-                    <div
-                      v-if="gitNodeTooltip.visible && gitNodeTooltip.node"
-                      class="project-info-git-graph-tooltip"
-                      :style="{ left: `${gitNodeTooltip.x}px`, top: `${gitNodeTooltip.y}px` }"
-                    >
-                      <strong><code>{{ gitNodeTooltip.node.short_hash }}</code> {{ gitNodeTooltip.node.subject || "-" }}</strong>
-                      <small>{{ t("projectInfo.gitGraphTooltipAuthor") }}: {{ gitNodeTooltip.node.author_name || t("projectInfo.unknownAuthor") }}</small>
-                      <small>{{ t("projectInfo.gitGraphTooltipDate") }}: {{ formatDateTime(gitNodeTooltip.node.authored_at) }}</small>
-                      <small>{{ t("projectInfo.gitGraphTooltipBranch") }}: {{ resolveGraphNodeBranchLabel(gitNodeTooltip.node) }}</small>
-                    </div>
-                  </div>
-
-                  <div class="project-info-git-graph-node-list">
-                    <h5>{{ t("projectInfo.gitGraphNodeListTitle") }}</h5>
-                    <div class="project-info-git-graph-node-rows">
-                      <article
-                        v-for="node in gitGraphNodePreview"
-                        :key="`graph-row-${node.id}`"
-                        class="project-info-git-graph-node-row"
-                      >
-                        <i class="project-info-git-graph-node-dot" :style="{ background: node.color }" />
-                        <div>
-                          <strong><code>{{ node.short_hash }}</code> {{ node.subject }}</strong>
-                          <small>
-                            {{ resolveGraphNodeBranchLabel(node) }} - {{ formatDateTime(node.authored_at) }}
-                          </small>
+                      <summary>
+                        <div class="project-info-git-tree-branch-head">
+                          <div class="project-info-git-tree-branch-title">
+                            <strong><code>{{ branch.name }}</code></strong>
+                            <small>{{ t("projectInfo.gitTreeCommitCount", { count: branch.commit_count }) }}</small>
+                          </div>
+                          <div class="project-info-git-tree-branch-badges">
+                            <small v-if="branch.is_default">{{ t("projectInfo.gitTreeDefault") }}</small>
+                            <small v-if="branch.is_current">{{ t("projectInfo.gitTreeCurrent") }}</small>
+                            <button
+                              v-if="canMutateGitState"
+                              class="btn btn-sm btn-ghost"
+                              type="button"
+                              :disabled="gitActionBusy || gitWorktreeDirty"
+                              @click.stop.prevent="openBranchInEditor(branch)"
+                            >
+                              {{ t("projectInfo.gitActionOpenBranch") }}
+                            </button>
+                          </div>
                         </div>
-                      </article>
+                      </summary>
+
+                      <div class="project-info-git-tree-dates">
+                        <details
+                          v-for="dateGroup in branch.dates"
+                          :key="`tree-date-${branch.name}-${dateGroup.date}`"
+                          class="project-info-git-tree-date"
+                        >
+                          <summary>
+                            <strong>{{ formatGitTreeDate(dateGroup.date) }}</strong>
+                            <small>{{ t("projectInfo.gitTreeCommitCount", { count: dateGroup.count }) }}</small>
+                          </summary>
+                          <div class="project-info-history-list">
+                            <article
+                              v-for="commit in dateGroup.commits"
+                              :key="`tree-commit-${branch.name}-${commit.hash}`"
+                              class="project-info-history-row"
+                            >
+                              <div class="project-info-history-row-head">
+                                <header>
+                                  <strong><code>{{ commit.short_hash }}</code> {{ commit.subject }}</strong>
+                                </header>
+                                <div v-if="canMutateGitState" class="project-info-history-row-actions">
+                                  <button
+                                    class="btn btn-sm btn-ghost"
+                                    type="button"
+                                    :disabled="gitActionBusy || gitWorktreeDirty"
+                                    @click="branchCommitAndOpen(commit)"
+                                  >
+                                    {{ t("projectInfo.gitActionBranchAndOpen") }}
+                                  </button>
+                                  <button
+                                    class="btn btn-sm btn-ghost"
+                                    type="button"
+                                    :disabled="gitActionBusy || gitWorktreeDirty"
+                                    @click="checkoutCommitAndOpen(commit)"
+                                  >
+                                    {{ t("projectInfo.gitActionCheckoutCommit") }}
+                                  </button>
+                                </div>
+                              </div>
+                              <small>
+                                {{ commit.author_name }} - {{ formatDateTime(commit.authored_at) }}
+                              </small>
+                            </article>
+                          </div>
+                        </details>
+                      </div>
+                    </details>
+                  </div>
+                </div>
+
+                <div v-if="history.git?.tree_available && !history.git?.tree_error">
+                  <h4>{{ t("projectInfo.gitGraphTitle") }}</h4>
+                  <p class="muted-text">{{ t("projectInfo.gitGraphHint") }}</p>
+                  <p v-if="!gitVisualGraph.ready" class="muted-text">{{ t("projectInfo.gitGraphEmpty") }}</p>
+                  <div v-else class="project-info-git-graph-root">
+                    <div class="project-info-git-graph-legend">
+                      <button
+                        v-for="branch in gitGraphBranches"
+                        :key="`graph-branch-${branch.name}`"
+                        class="project-info-git-graph-legend-item"
+                        :class="{
+                          'is-active': gitGraphActiveBranchName === branch.name,
+                          'is-dimmed': gitGraphActiveBranchName !== 'all' && gitGraphActiveBranchName !== branch.name,
+                        }"
+                        type="button"
+                        :aria-pressed="gitGraphActiveBranchName === branch.name ? 'true' : 'false'"
+                        @click="toggleGitGraphBranch(branch.name)"
+                      >
+                        <i class="project-info-git-graph-legend-color" :style="{ background: branch.color }" />
+                        <code>{{ branch.name }}</code>
+                        <small v-if="branch.is_default">{{ t("projectInfo.gitGraphRoot") }}</small>
+                        <small v-if="branch.is_current">{{ t("projectInfo.gitTreeCurrent") }}</small>
+                      </button>
+                    </div>
+
+                    <div
+                      ref="gitGraphCanvasWrapRef"
+                      class="project-info-git-graph-canvas-wrap"
+                      @mouseleave="hideGitNodeTooltip"
+                    >
+                      <svg
+                        class="project-info-git-graph-canvas"
+                        :viewBox="`0 0 ${gitVisualGraph.width} ${gitVisualGraph.height}`"
+                        preserveAspectRatio="xMidYMin meet"
+                        :style="{ width: `${gitVisualGraph.renderWidth}px` }"
+                        role="img"
+                        :aria-label="t('projectInfo.gitGraphTitle')"
+                      >
+                        <g class="project-info-git-graph-lanes">
+                          <line
+                            v-for="branch in gitVisualGraph.branches"
+                            :key="`graph-lane-${branch.name}`"
+                            class="project-info-git-graph-lane"
+                            :x1="branch.x"
+                            :y1="gitVisualGraph.laneTop"
+                            :x2="branch.x"
+                            :y2="gitVisualGraph.laneBottom"
+                            :style="{ stroke: branch.color }"
+                          />
+                        </g>
+
+                        <g class="project-info-git-graph-edges">
+                          <path
+                            v-for="edge in gitVisualGraph.edges"
+                            :key="edge.key"
+                            class="project-info-git-graph-edge"
+                            :class="{ 'is-cross-branch': edge.dashed }"
+                            :d="edge.path"
+                            :style="{ stroke: edge.color }"
+                          />
+                        </g>
+
+                        <g class="project-info-git-graph-nodes">
+                          <g
+                            v-for="node in gitVisualGraph.nodes"
+                            :key="`graph-node-${node.id}`"
+                            :transform="`translate(${node.x} ${node.y})`"
+                            @mouseenter="showGitNodeTooltip($event, node)"
+                            @mousemove="moveGitNodeTooltip($event)"
+                            @mouseleave="hideGitNodeTooltip"
+                          >
+                            <circle
+                              class="project-info-git-graph-node"
+                              r="4"
+                              :style="{ fill: node.color }"
+                            />
+                            <circle class="project-info-git-graph-node-core" r="1.6" />
+                            <title>{{ `${node.short_hash} | ${node.subject} | ${formatDateTime(node.authored_at)}` }}</title>
+                          </g>
+                        </g>
+                      </svg>
+
+                      <div
+                        v-if="gitNodeTooltip.visible && gitNodeTooltip.node"
+                        class="project-info-git-graph-tooltip"
+                        :style="{ left: `${gitNodeTooltip.x}px`, top: `${gitNodeTooltip.y}px` }"
+                      >
+                        <strong><code>{{ gitNodeTooltip.node.short_hash }}</code> {{ gitNodeTooltip.node.subject || "-" }}</strong>
+                        <small>{{ t("projectInfo.gitGraphTooltipAuthor") }}: {{ gitNodeTooltip.node.author_name || t("projectInfo.unknownAuthor") }}</small>
+                        <small>{{ t("projectInfo.gitGraphTooltipDate") }}: {{ formatDateTime(gitNodeTooltip.node.authored_at) }}</small>
+                        <small>{{ t("projectInfo.gitGraphTooltipBranch") }}: {{ resolveGraphNodeBranchLabel(gitNodeTooltip.node) }}</small>
+                      </div>
+                    </div>
+
+                    <div class="project-info-git-graph-node-list">
+                      <h5>{{ t("projectInfo.gitGraphNodeListTitle") }}</h5>
+                      <div class="project-info-git-graph-node-rows">
+                        <article
+                          v-for="node in gitGraphNodePreview"
+                          :key="`graph-row-${node.id}`"
+                          class="project-info-git-graph-node-row"
+                        >
+                          <i class="project-info-git-graph-node-dot" :style="{ background: node.color }" />
+                          <div>
+                            <strong><code>{{ node.short_hash }}</code> {{ node.subject }}</strong>
+                            <small>
+                              {{ resolveGraphNodeBranchLabel(node) }} - {{ formatDateTime(node.authored_at) }}
+                            </small>
+                          </div>
+                        </article>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -334,31 +425,35 @@
               <p v-if="filteredGitCommits.length === 0" class="muted-text">{{ t("projectInfo.gitHistoryEmpty") }}</p>
               <div v-else class="project-info-history-list">
                 <article v-for="commit in filteredGitCommits" :key="commit.hash" class="project-info-history-row">
-                  <header>
-                    <strong><code>{{ commit.short_hash }}</code> {{ commit.subject }}</strong>
-                  </header>
+                  <div class="project-info-history-row-head">
+                    <header>
+                      <strong><code>{{ commit.short_hash }}</code> {{ commit.subject }}</strong>
+                    </header>
+                    <div v-if="canMutateGitState" class="project-info-history-row-actions">
+                      <button
+                        class="btn btn-sm btn-ghost"
+                        type="button"
+                        :disabled="gitActionBusy || gitWorktreeDirty"
+                        @click="branchCommitAndOpen(commit)"
+                      >
+                        {{ t("projectInfo.gitActionBranchAndOpen") }}
+                      </button>
+                      <button
+                        class="btn btn-sm btn-ghost"
+                        type="button"
+                        :disabled="gitActionBusy || gitWorktreeDirty"
+                        @click="checkoutCommitAndOpen(commit)"
+                      >
+                        {{ t("projectInfo.gitActionCheckoutCommit") }}
+                      </button>
+                    </div>
+                  </div>
                   <small>
                     {{ commit.author_name }} - {{ formatDateTime(commit.authored_at) }}
                   </small>
                 </article>
               </div>
             </template>
-          </div>
-
-          <div>
-            <h3>{{ t("projectInfo.snapshotHistoryTitle") }}</h3>
-            <p v-if="filteredSnapshots.length === 0" class="muted-text">{{ t("projectInfo.snapshotHistoryEmpty") }}</p>
-            <div v-else class="project-info-history-list">
-              <article v-for="snapshot in filteredSnapshots" :key="snapshot.snapshot_id" class="project-info-history-row">
-                <header>
-                  <strong>#{{ snapshot.snapshot_id }} {{ snapshot.message || t("projectInfo.snapshotNoMessage") }}</strong>
-                </header>
-                <small>
-                  {{ snapshot.author?.name || t("projectInfo.unknownAuthor") }} - {{ formatDateTime(snapshot.created_at) }}
-                </small>
-                <small><code>{{ snapshot.snapshot_path }}</code></small>
-              </article>
-            </div>
           </div>
         </div>
       </section>
@@ -381,6 +476,7 @@ const session = ref(getSession());
 const loading = ref(false);
 const settingsBusy = ref(false);
 const collaboratorBusy = ref(false);
+const gitActionBusy = ref(false);
 const notice = ref("");
 const error = ref("");
 
@@ -418,7 +514,6 @@ const roles = computed(() => {
 });
 const stats = computed(() => payload.value?.stats || {
   total_commits: 0,
-  total_snapshots: 0,
   contributors: [],
 });
 const history = computed(() => payload.value?.history || {
@@ -426,12 +521,18 @@ const history = computed(() => payload.value?.history || {
     available: false,
     commits: [],
     error: "",
+    has_changes: false,
+    tree_available: false,
+    tree_error: "",
+    branch_tree: [],
   },
-  snapshots: [],
 });
 const canManageSettings = computed(() => Boolean(permissions.value?.can_manage_settings));
 const canManageParticipants = computed(() => Boolean(permissions.value?.can_manage_participants));
+const canMutateGitState = computed(() => Boolean(permissions.value?.can_write_project) && Boolean(history.value?.git?.available));
+const gitWorktreeDirty = computed(() => Boolean(history.value?.git?.has_changes));
 const historyAuthorFilter = ref("all");
+const gitGraphBranchFilter = ref("all");
 const rolePriority = ["viewer", "developer", "maintainer"];
 
 const assignableRoles = computed(() => {
@@ -453,7 +554,6 @@ const statsTimeline = computed(() => {
     .map((row) => ({
       date: String(row?.date || "").trim(),
       commits: Math.max(0, Number(row?.commits || 0)),
-      snapshots: Math.max(0, Number(row?.snapshots || 0)),
     }))
     .filter((point) => point.date !== "");
 
@@ -461,7 +561,7 @@ const statsTimeline = computed(() => {
     return [];
   }
 
-  const maxValue = points.reduce((max, point) => Math.max(max, point.commits, point.snapshots), 0);
+  const maxValue = points.reduce((max, point) => Math.max(max, point.commits), 0);
   const normalizedMax = maxValue > 0 ? maxValue : 1;
 
   return points.map((point) => ({
@@ -469,20 +569,10 @@ const statsTimeline = computed(() => {
     commitsHeight: point.commits > 0
       ? Math.max(8, Math.round((point.commits / normalizedMax) * 100))
       : 0,
-    snapshotsHeight: point.snapshots > 0
-      ? Math.max(8, Math.round((point.snapshots / normalizedMax) * 100))
-      : 0,
   }));
 });
 
-const isForgejoConnected = computed(() => {
-  if (!project.value?.git_enabled) {
-    return false;
-  }
-
-  return String(project.value?.forgejo_repo_full_name || "").trim() !== ""
-    || String(project.value?.forgejo_repo_clone_url || "").trim() !== "";
-});
+const hasGitTreeData = computed(() => Boolean(history.value?.git?.tree_available));
 
 const gitBranchTree = computed(() => {
   return Array.isArray(history.value?.git?.branch_tree) ? history.value.git.branch_tree : [];
@@ -512,6 +602,7 @@ const filteredGitBranchTree = computed(() => {
 
       return {
         name: branchName,
+        head_hash: String(branch?.head_hash || "").trim(),
         is_default: Boolean(branch?.is_default),
         is_current: Boolean(branch?.is_current),
         commit_count: filteredDates.reduce((sum, item) => sum + Number(item.count || 0), 0),
@@ -538,37 +629,20 @@ const gitGraphPalette = [
   "#f97316",
 ];
 
-const gitVisualGraph = computed(() => {
-  if (!isForgejoConnected.value || !history.value?.git?.tree_available) {
-    return {
-      ready: false,
-      branches: [],
-      nodes: [],
-      edges: [],
-      width: 0,
-      height: 0,
-      laneTop: 0,
-      laneBottom: 0,
-    };
+const gitGraphBranches = computed(() => {
+  if (!hasGitTreeData.value) {
+    return [];
   }
 
   const branchInput = filteredGitBranchTree.value;
   if (!Array.isArray(branchInput) || branchInput.length === 0) {
-    return {
-      ready: false,
-      branches: [],
-      nodes: [],
-      edges: [],
-      width: 0,
-      height: 0,
-      laneTop: 0,
-      laneBottom: 0,
-    };
+    return [];
   }
 
-  const branches = branchInput
+  return branchInput
     .map((branch) => ({
       name: String(branch?.name || "").trim(),
+      head_hash: String(branch?.head_hash || "").trim(),
       is_default: Boolean(branch?.is_default),
       is_current: Boolean(branch?.is_current),
       commit_count: Math.max(0, Number(branch?.commit_count || 0)),
@@ -593,6 +667,46 @@ const gitVisualGraph = computed(() => {
       index,
       color: gitGraphPalette[index % gitGraphPalette.length],
     }));
+});
+
+const gitGraphActiveBranchName = computed(() => {
+  const selectedBranchName = String(gitGraphBranchFilter.value || "all").trim();
+  if (selectedBranchName === "all") {
+    return "all";
+  }
+
+  return gitGraphBranches.value.some((branch) => branch.name === selectedBranchName)
+    ? selectedBranchName
+    : "all";
+});
+
+const gitGraphVisibleBranches = computed(() => {
+  const visibleBranches = gitGraphActiveBranchName.value === "all"
+    ? gitGraphBranches.value
+    : gitGraphBranches.value.filter((branch) => branch.name === gitGraphActiveBranchName.value);
+
+  return visibleBranches.map((branch, index) => ({
+    ...branch,
+    index,
+  }));
+});
+
+const gitVisualGraph = computed(() => {
+  if (!hasGitTreeData.value) {
+    return {
+      ready: false,
+      branches: [],
+      nodes: [],
+      edges: [],
+      width: 0,
+      height: 0,
+      laneTop: 0,
+      laneBottom: 0,
+      renderWidth: 0,
+    };
+  }
+
+  const branches = gitGraphVisibleBranches.value;
 
   if (branches.length === 0) {
     return {
@@ -604,25 +718,27 @@ const gitVisualGraph = computed(() => {
       height: 0,
       laneTop: 0,
       laneBottom: 0,
+      renderWidth: 0,
     };
   }
 
   const perBranchCommitLimit = 48;
   const totalNodeLimit = 260;
-  const rawNodes = [];
+  const commitMap = new Map();
 
   branches.forEach((branch) => {
-    const branchNodes = [];
     const seenHashes = new Set();
+    let branchCommitCount = 0;
 
     branch.dates.forEach((dateGroup) => {
       const commits = Array.isArray(dateGroup?.commits) ? dateGroup.commits : [];
       commits.forEach((commit) => {
         const hash = String(commit?.hash || "").trim();
-        if (!hash || seenHashes.has(hash)) {
+        if (!hash || seenHashes.has(hash) || branchCommitCount >= perBranchCommitLimit) {
           return;
         }
         seenHashes.add(hash);
+        branchCommitCount += 1;
 
         const authoredAt = String(commit?.authored_at || "").trim();
         const timestamp = Date.parse(authoredAt);
@@ -632,8 +748,16 @@ const gitVisualGraph = computed(() => {
             .map((parent) => String(parent || "").trim())
             .filter((parent) => parent !== "")
           : [];
-        branchNodes.push({
-          id: `${branch.name}:${hash}`,
+        const existing = commitMap.get(hash);
+        if (existing) {
+          existing.branch_name_set.add(branch.name);
+          if (branch.head_hash !== "" && branch.head_hash === hash) {
+            existing.head_branch_name_set.add(branch.name);
+          }
+          return;
+        }
+
+        commitMap.set(hash, {
           hash,
           short_hash: String(commit?.short_hash || "").trim() || hash.slice(0, 7),
           subject: String(commit?.subject || "").trim(),
@@ -641,26 +765,37 @@ const gitVisualGraph = computed(() => {
           authored_at: authoredAt,
           authored_ts: authoredTs,
           parents,
-          lane_index: branch.index,
-          branch_name: branch.name,
-          branch_names: [branch.name],
-          color: branch.color,
+          branch_name_set: new Set([branch.name]),
+          head_branch_name_set: branch.head_hash !== "" && branch.head_hash === hash
+            ? new Set([branch.name])
+            : new Set(),
         });
       });
     });
-
-    branchNodes.sort((left, right) => {
-      if (left.authored_ts !== right.authored_ts) {
-        return right.authored_ts - left.authored_ts;
-      }
-
-      return left.hash.localeCompare(right.hash);
-    });
-
-    rawNodes.push(...branchNodes.slice(0, perBranchCommitLimit));
   });
 
-  const nodes = rawNodes
+  const branchOrder = branches.map((branch) => branch.name);
+  const branchIndexByName = new Map(branches.map((branch) => [branch.name, branch.index]));
+  const branchColorByName = new Map(branches.map((branch) => [branch.name, branch.color]));
+
+  const nodes = Array.from(commitMap.values())
+    .map((node) => {
+      const orderedBranchNames = branchOrder.filter((branchName) => node.branch_name_set.has(branchName));
+      const orderedHeadBranchNames = branchOrder.filter((branchName) => node.head_branch_name_set.has(branchName));
+      const laneBranchName = orderedHeadBranchNames[0] || orderedBranchNames[0] || "";
+      const laneIndex = Number(branchIndexByName.get(laneBranchName) ?? 0);
+      const color = branchColorByName.get(laneBranchName) || branches[0]?.color || gitGraphPalette[0];
+
+      return {
+        ...node,
+        id: node.hash,
+        lane_branch_name: laneBranchName,
+        lane_index: laneIndex,
+        branch_names: orderedBranchNames,
+        head_branch_names: orderedHeadBranchNames,
+        color,
+      };
+    })
     .sort((left, right) => {
       if (left.authored_ts !== right.authored_ts) {
         return right.authored_ts - left.authored_ts;
@@ -682,37 +817,30 @@ const gitVisualGraph = computed(() => {
       height: 0,
       laneTop: 0,
       laneBottom: 0,
+      renderWidth: 0,
     };
   }
 
-  const laneGap = 92;
-  const rowGap = 44;
-  const padX = 44;
-  const padY = 24;
-  const width = Math.max(320, (padX * 2) + ((branches.length - 1) * laneGap) + 120);
-  const height = Math.max(220, (padY * 2) + ((nodes.length - 1) * rowGap) + 40);
-  const laneTop = padY - 12;
-  const laneBottom = height - 20;
+  const laneGap = 76;
+  const rowGap = 36;
+  const padX = 32;
+  const padY = 20;
+  const laneSpan = Math.max(0, (branches.length - 1) * laneGap);
+  const width = Math.max(280, (padX * 2) + laneSpan + 32);
+  const height = Math.max(180, (padY * 2) + ((nodes.length - 1) * rowGap) + 28);
+  const laneStartX = (width / 2) - (laneSpan / 2);
+  const laneTop = Math.max(8, padY - 10);
+  const laneBottom = height - 14;
 
   const indexedNodes = nodes.map((node, rowIndex) => {
     return {
       ...node,
-      x: padX + (node.lane_index * laneGap),
+      x: laneStartX + (node.lane_index * laneGap),
       y: padY + (rowIndex * rowGap),
     };
   });
 
-  const nodeById = new Map(indexedNodes.map((node) => [node.id, node]));
-  const nodesByHash = new Map();
-  indexedNodes.forEach((node) => {
-    if (!nodesByHash.has(node.hash)) {
-      nodesByHash.set(node.hash, []);
-    }
-    nodesByHash.get(node.hash).push(node);
-  });
-  nodesByHash.forEach((items) => {
-    items.sort((left, right) => left.y - right.y);
-  });
+  const nodeByHash = new Map(indexedNodes.map((node) => [node.hash, node]));
 
   const edgeKeys = new Set();
   const edges = [];
@@ -725,36 +853,7 @@ const gitVisualGraph = computed(() => {
         return;
       }
 
-      let parent = nodeById.get(`${node.branch_name}:${parentHash}`) || null;
-      let dashed = false;
-      if (!parent) {
-        const candidates = Array.isArray(nodesByHash.get(parentHash)) ? nodesByHash.get(parentHash) : [];
-        if (candidates.length === 0) {
-          return;
-        }
-
-        const olderCandidates = candidates.filter((candidate) => candidate.y > node.y);
-        const pool = olderCandidates.length > 0 ? olderCandidates : candidates;
-        parent = pool
-          .slice()
-          .sort((left, right) => {
-            const leftLaneDistance = Math.abs(left.lane_index - node.lane_index);
-            const rightLaneDistance = Math.abs(right.lane_index - node.lane_index);
-            if (leftLaneDistance !== rightLaneDistance) {
-              return leftLaneDistance - rightLaneDistance;
-            }
-
-            const leftRowDistance = Math.abs(left.y - node.y);
-            const rightRowDistance = Math.abs(right.y - node.y);
-            if (leftRowDistance !== rightRowDistance) {
-              return leftRowDistance - rightRowDistance;
-            }
-
-            return left.id.localeCompare(right.id);
-          })[0] || null;
-        dashed = Boolean(parent) && parent.branch_name !== node.branch_name;
-      }
-
+      const parent = nodeByHash.get(parentHash) || null;
       if (!parent) {
         return;
       }
@@ -768,8 +867,8 @@ const gitVisualGraph = computed(() => {
       if (Math.abs(node.x - parent.x) <= 1) {
         edges.push({
           key: edgeKey,
-          color: node.color,
-          dashed,
+          color: parentIndex === 0 ? node.color : parent.color,
+          dashed: parentIndex > 0 || parent.lane_branch_name !== node.lane_branch_name,
           path: `M ${node.x} ${node.y} L ${parent.x} ${parent.y}`,
         });
         return;
@@ -780,8 +879,8 @@ const gitVisualGraph = computed(() => {
       const cp2y = node.y + (deltaY * 0.64);
       edges.push({
         key: edgeKey,
-        color: node.color,
-        dashed,
+        color: parentIndex === 0 ? node.color : parent.color,
+        dashed: parentIndex > 0 || parent.lane_branch_name !== node.lane_branch_name,
         path: `M ${node.x} ${node.y} C ${node.x} ${cp1y}, ${parent.x} ${cp2y}, ${parent.x} ${parent.y}`,
       });
     });
@@ -791,7 +890,7 @@ const gitVisualGraph = computed(() => {
     ready: true,
     branches: branches.map((branch) => ({
       ...branch,
-      x: padX + (branch.index * laneGap),
+      x: laneStartX + (branch.index * laneGap),
     })),
     nodes: indexedNodes,
     edges,
@@ -799,6 +898,7 @@ const gitVisualGraph = computed(() => {
     height,
     laneTop,
     laneBottom,
+    renderWidth: width,
   };
 });
 
@@ -818,19 +918,6 @@ const filteredGitCommits = computed(() => {
   }
 
   return commits.filter((commit) => resolveCommitContributorKey(commit) === filterKey);
-});
-
-const filteredSnapshots = computed(() => {
-  const snapshots = Array.isArray(history.value?.snapshots) ? history.value.snapshots : [];
-  const filterKey = String(historyAuthorFilter.value || "all");
-  if (filterKey === "all") {
-    return snapshots;
-  }
-
-  return snapshots.filter((snapshot) => {
-    const authorId = Number(snapshot?.author?.user_id || 0);
-    return authorId > 0 && `user:${authorId}` === filterKey;
-  });
 });
 
 function readError(errorInput) {
@@ -891,6 +978,44 @@ function formatShortDate(value) {
     month: "short",
     day: "numeric",
   });
+}
+
+function formatGitTreeDate(value) {
+  const raw = String(value || "").trim();
+  if (!raw || raw === "unknown") {
+    return t("projectInfo.gitTreeDateUnknown");
+  }
+
+  return formatShortDate(raw);
+}
+
+function buildBranchNameSuggestion(commit) {
+  const shortHash = String(commit?.short_hash || "head").trim() || "head";
+  const subjectSlug = String(commit?.subject || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 32);
+
+  if (subjectSlug !== "") {
+    return `${subjectSlug}-${shortHash}`;
+  }
+
+  return `branch-${shortHash}`;
+}
+
+function readGitActionError(errorInput) {
+  const backendMessage = String(errorInput?.data?.message || "").trim();
+  if (backendMessage === "Commit or stash local changes before switching project Git state.") {
+    return t("projectInfo.gitActionDirtyHint");
+  }
+
+  if (backendMessage === "Git repository is not initialized for this project.") {
+    return t("projectInfo.gitActionRepoMissing");
+  }
+
+  return readError(errorInput);
 }
 
 function normalizeRole(value) {
@@ -990,6 +1115,20 @@ function resolveGitNodeTooltipPosition(event) {
     x: Math.min(Math.max(10, Math.round(rawX)), maxX),
     y: Math.min(Math.max(10, Math.round(rawY)), maxY),
   };
+}
+
+function toggleGitGraphBranch(branchName) {
+  const normalizedBranchName = String(branchName || "").trim();
+  if (normalizedBranchName === "") {
+    gitGraphBranchFilter.value = "all";
+    hideGitNodeTooltip();
+    return;
+  }
+
+  gitGraphBranchFilter.value = gitGraphActiveBranchName.value === normalizedBranchName
+    ? "all"
+    : normalizedBranchName;
+  hideGitNodeTooltip();
 }
 
 function showGitNodeTooltip(event, node) {
@@ -1196,6 +1335,135 @@ async function removeCollaborator(participant) {
     error.value = readError(removeError);
   } finally {
     collaboratorBusy.value = false;
+  }
+}
+
+async function openBranchInEditor(branch) {
+  if (!projectId.value) {
+    return;
+  }
+
+  const branchName = String(branch?.name || "").trim();
+  if (!branchName) {
+    return;
+  }
+
+  if (branch?.is_current) {
+    await openEditor();
+    return;
+  }
+
+  const confirmed = typeof window === "undefined"
+    ? true
+    : window.confirm(t("projectInfo.gitActionSwitchBranchConfirm", { name: branchName }));
+  if (!confirmed || gitActionBusy.value || !canMutateGitState.value) {
+    return;
+  }
+
+  gitActionBusy.value = true;
+  error.value = "";
+
+  try {
+    await request({
+      method: "POST",
+      path: `/projects/${projectId.value}/git/checkout-branch`,
+      auth: true,
+      body: {
+        branch_name: branchName,
+      },
+    });
+
+    await openEditor();
+  } catch (actionError) {
+    error.value = readGitActionError(actionError);
+  } finally {
+    gitActionBusy.value = false;
+  }
+}
+
+async function branchCommitAndOpen(commit) {
+  if (!projectId.value || gitActionBusy.value || !canMutateGitState.value) {
+    return;
+  }
+
+  const commitHash = String(commit?.hash || "").trim();
+  if (!commitHash) {
+    return;
+  }
+
+  const suggestedName = buildBranchNameSuggestion(commit);
+  const branchName = typeof window === "undefined"
+    ? suggestedName
+    : window.prompt(
+      t("projectInfo.gitActionBranchPrompt", {
+        hash: String(commit?.short_hash || "").trim() || commitHash.slice(0, 7),
+      }),
+      suggestedName,
+    );
+
+  const normalizedBranchName = String(branchName || "").trim();
+  if (!normalizedBranchName) {
+    return;
+  }
+
+  gitActionBusy.value = true;
+  error.value = "";
+
+  try {
+    await request({
+      method: "POST",
+      path: `/projects/${projectId.value}/git/branch`,
+      auth: true,
+      body: {
+        branch_name: normalizedBranchName,
+        commit_hash: commitHash,
+      },
+    });
+
+    await openEditor();
+  } catch (actionError) {
+    error.value = readGitActionError(actionError);
+  } finally {
+    gitActionBusy.value = false;
+  }
+}
+
+async function checkoutCommitAndOpen(commit) {
+  if (!projectId.value || gitActionBusy.value || !canMutateGitState.value) {
+    return;
+  }
+
+  const commitHash = String(commit?.hash || "").trim();
+  if (!commitHash) {
+    return;
+  }
+
+  const shortHash = String(commit?.short_hash || "").trim() || commitHash.slice(0, 7);
+  const confirmed = typeof window === "undefined"
+    ? true
+    : window.confirm(t("projectInfo.gitActionCheckoutConfirm", { hash: shortHash }));
+  if (!confirmed) {
+    return;
+  }
+
+  gitActionBusy.value = true;
+  error.value = "";
+
+  try {
+    await request({
+      method: "POST",
+      path: `/projects/${projectId.value}/git/checkout-commit`,
+      auth: true,
+      body: {
+        commit_hash: commitHash,
+      },
+    });
+
+    await openEditor();
+  } catch (actionError) {
+    error.value = readGitActionError(actionError);
+  } finally {
+    gitActionBusy.value = false;
   }
 }
 
