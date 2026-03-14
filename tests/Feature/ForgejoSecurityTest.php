@@ -421,8 +421,21 @@ class ForgejoSecurityTest extends TestCase
 
         $this->mock(ProjectGitService::class, function (MockInterface $mock): void {
             $mock->shouldReceive('initRepository')->once();
+            $mock->shouldReceive('currentBranch')->once()->andReturn('feature/demo');
             $mock->shouldReceive('commitAll')->once()->andReturn(false);
-            $mock->shouldReceive('push')->once()->andReturn("To http://forgejo:3000/gigabyte/my-repo1.git\n   abc..def  main -> main");
+            $mock->shouldReceive('push')
+                ->once()
+                ->withArgs(function (
+                    string $path,
+                    string $remoteUrl,
+                    string $branch,
+                    string $token,
+                    array $author
+                ): bool {
+                    return $remoteUrl === 'http://forgejo:3000/gigabyte/my-repo1.git'
+                        && $branch === 'feature/demo';
+                })
+                ->andReturn("To http://forgejo:3000/gigabyte/my-repo1.git\n * [new branch]      feature/demo -> feature/demo");
         });
 
         $token = $owner->createToken('test')->plainTextToken;
@@ -431,7 +444,10 @@ class ForgejoSecurityTest extends TestCase
             'message' => 'retry push',
         ]);
 
-        $response->assertOk()->assertJsonPath('status', 'pushed');
+        $response
+            ->assertOk()
+            ->assertJsonPath('status', 'pushed')
+            ->assertJsonPath('branch', 'feature/demo');
         $this->assertNotNull($project->fresh()->forgejo_last_push_at);
     }
 
@@ -467,6 +483,7 @@ class ForgejoSecurityTest extends TestCase
 
         $this->mock(ProjectGitService::class, function (MockInterface $mock): void {
             $mock->shouldReceive('initRepository')->once();
+            $mock->shouldReceive('currentBranch')->once()->andReturn('main');
             $mock->shouldReceive('commitAll')->once()->andReturn(false);
             $mock->shouldReceive('push')->once()->andThrow(
                 new \RuntimeException("error: src refspec main does not match any\nerror: failed to push some refs")
@@ -515,6 +532,7 @@ class ForgejoSecurityTest extends TestCase
 
         $this->mock(ProjectGitService::class, function (MockInterface $mock): void {
             $mock->shouldReceive('initRepository')->once();
+            $mock->shouldReceive('currentBranch')->once()->andReturn('feature/retry');
             $mock->shouldReceive('commitAll')->once()->andReturn(false);
             $mock->shouldReceive('push')
                 ->once()
@@ -526,7 +544,8 @@ class ForgejoSecurityTest extends TestCase
                     string $token,
                     array $author
                 ): bool {
-                    return $remoteUrl === 'http://localhost:3000/gigabyte/my-repo1.git';
+                    return $remoteUrl === 'http://localhost:3000/gigabyte/my-repo1.git'
+                        && $branch === 'feature/retry';
                 })
                 ->andThrow(new \RuntimeException(
                     "fatal: unable to access 'http://localhost:3000/gigabyte/my-repo1.git/': Failed to connect to localhost port 3000 after 0 ms: Couldn't connect to server"
@@ -542,9 +561,10 @@ class ForgejoSecurityTest extends TestCase
                     string $token,
                     array $author
                 ): bool {
-                    return $remoteUrl === 'http://forgejo:3000/gigabyte/my-repo1.git';
+                    return $remoteUrl === 'http://forgejo:3000/gigabyte/my-repo1.git'
+                        && $branch === 'feature/retry';
                 })
-                ->andReturn("To http://forgejo:3000/gigabyte/my-repo1.git\n   abc..def  main -> main");
+                ->andReturn("To http://forgejo:3000/gigabyte/my-repo1.git\n * [new branch]      feature/retry -> feature/retry");
         });
 
         $token = $owner->createToken('test')->plainTextToken;
@@ -558,6 +578,57 @@ class ForgejoSecurityTest extends TestCase
             'http://forgejo:3000/gigabyte/my-repo1.git',
             (string) $project->fresh()->forgejo_repo_clone_url
         );
+    }
+
+    public function test_save_rejects_push_from_detached_head_workspace(): void
+    {
+        config([
+            'services.forgejo.base_url' => 'http://forgejo:3000',
+            'services.forgejo.public_url' => 'http://localhost:3000',
+            'services.forgejo.git_base_url' => 'http://forgejo:3000',
+            'services.forgejo.client_id' => 'client-id',
+            'services.forgejo.client_secret' => 'client-secret',
+            'services.forgejo.redirect_url' => 'https://app.example.test/forgejo/callback',
+        ]);
+
+        $owner = $this->createUser('save-detached-owner@example.com');
+        $owner->forgejo_access_token = 'forgejo-token';
+        $owner->forgejo_connected_at = now();
+        $owner->save();
+
+        $project = Project::query()->create([
+            'name' => 'Save Detached',
+            'description' => 'demo',
+            'owner_id' => $owner->user_id,
+            'project_path' => 'projects/save-detached',
+            'is_public' => false,
+        ]);
+        $project->git_enabled = true;
+        $project->forgejo_repo_full_name = 'gigabyte/my-repo1';
+        $project->forgejo_repo_clone_url = 'http://forgejo:3000/gigabyte/my-repo1.git';
+        $project->forgejo_default_branch = 'main';
+        $project->forgejo_connected_at = now();
+        $project->save();
+
+        $this->mock(ProjectGitService::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('initRepository')->once();
+            $mock->shouldReceive('currentBranch')->once()->andReturnNull();
+            $mock->shouldNotReceive('commitAll');
+            $mock->shouldNotReceive('push');
+        });
+
+        $token = $owner->createToken('test')->plainTextToken;
+
+        $response = $this->withToken($token)->postJson('/api/projects/'.$project->project_id.'/forgejo/save', [
+            'message' => 'detached push',
+        ]);
+
+        $response
+            ->assertStatus(409)
+            ->assertJsonPath(
+                'message',
+                'Current workspace is on a detached commit. Create or switch to a branch before pushing to Forgejo.'
+            );
     }
 
     public function test_collaborator_can_create_pull_request_for_configured_repository(): void

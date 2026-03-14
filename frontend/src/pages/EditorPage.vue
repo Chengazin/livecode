@@ -60,6 +60,7 @@
           :forgejo-account-connected="forgejoAccountConnected"
           :has-forgejo-repo="hasForgejoRepo"
           :forgejo-repo-full-name="projectMeta?.forgejo_repo_full_name || ''"
+          :forgejo-repo-html-url="projectMeta?.forgejo_repo_html_url || ''"
           :can-create-pull-request="canCreatePullRequest"
           :selected-project-id="selectedProjectId"
           @go-to-projects="goToProjects"
@@ -500,6 +501,8 @@ const realtimeRemoteColors = [
 const EDITOR_SYNC_DEBOUNCE_MS = 36;
 const EDITOR_SYNC_DELETE_DEBOUNCE_MS = 160;
 const AceRange = ace.require("ace/range").Range;
+const ACE_LINE_COMMENT_TRIGGER_OFFSET_X = 3;
+const ACE_LINE_COMMENT_POPOVER_OFFSET_X = 8;
 
 let activeRealtimeProjectId = "";
 let realtimeChannel = null;
@@ -994,7 +997,7 @@ function positionAceLineCommentPopover(lineNumberInput) {
   aceLineCommentPopover.row = row;
   aceLineCommentPopover.line_number = lineNumber;
   aceLineCommentPopover.top = Math.round(clampValue(baseTop, 8, maxTop));
-  aceLineCommentPopover.left = Math.round(clampValue(gutterWidth + 22, 56, maxLeft));
+  aceLineCommentPopover.left = Math.round(clampValue(gutterWidth + ACE_LINE_COMMENT_POPOVER_OFFSET_X, 56, maxLeft));
 }
 
 function openAceLineCommentsAtLine(lineNumberInput) {
@@ -1050,7 +1053,7 @@ function updateAceLineCommentTriggerPosition(clientX, clientY) {
   aceLineCommentTrigger.row = safeRow;
   aceLineCommentTrigger.line_number = lineNumber;
   aceLineCommentTrigger.top = Math.round(clampValue(baseTop, 6, maxTop));
-  aceLineCommentTrigger.left = Math.round(clampValue(gutterWidth - 9, 6, maxLeft));
+  aceLineCommentTrigger.left = Math.round(clampValue(gutterWidth + ACE_LINE_COMMENT_TRIGGER_OFFSET_X, 6, maxLeft));
   aceLineCommentTrigger.has_comments = count > 0;
   aceLineCommentTrigger.count = count;
 }
@@ -1204,6 +1207,36 @@ function sortCodeComments(itemsInput) {
 
     return Number(left.comment_id || 0) - Number(right.comment_id || 0);
   });
+}
+
+function applyRealtimeCodeCommentUpdate(payloadInput) {
+  const payload = payloadInput && typeof payloadInput === "object" ? payloadInput : {};
+  const commentPayload = payload.comment && typeof payload.comment === "object" ? payload.comment : null;
+  const path = String(payload.path || commentPayload?.path || "");
+  if (!activeProjectPath.value || !path || path !== activeProjectPath.value) {
+    return;
+  }
+
+  const action = String(payload.action || "").trim().toLowerCase();
+  if (action === "deleted") {
+    const commentId = Number(payload.comment_id || commentPayload?.comment_id || 0);
+    if (!commentId) {
+      return;
+    }
+
+    codeComments.value = codeComments.value.filter((item) => item.comment_id !== commentId);
+    return;
+  }
+
+  const normalized = normalizeCodeComment(commentPayload || payload);
+  if (!normalized || normalized.path !== activeProjectPath.value) {
+    return;
+  }
+
+  codeComments.value = sortCodeComments([
+    ...codeComments.value.filter((item) => item.comment_id !== normalized.comment_id),
+    normalized,
+  ]);
 }
 
 function clearCodeCommentDecorations() {
@@ -2508,6 +2541,10 @@ async function startRealtimeSession() {
     }
   });
 
+  channel.listen(".realtime.code_comment.updated", (payload) => {
+    applyRealtimeCodeCommentUpdate(payload);
+  });
+
   channel.listen(".realtime.editor.operation", (payload) => {
     applyRemoteEditorOperation(payload?.operation || payload);
   });
@@ -2536,7 +2573,9 @@ async function startRealtimeSession() {
       window.clearInterval(chatFallbackPollTimerId);
     }
     chatFallbackPollTimerId = window.setInterval(() => {
-      void loadRealtimeChat();
+      if (!realtimeChannelSubscribed) {
+        void loadRealtimeChat();
+      }
     }, 8000);
 
     presenceIntervalTimerId = window.setInterval(() => {

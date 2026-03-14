@@ -118,7 +118,7 @@ class ProjectGitService
             $git,
             'for-each-ref',
             '--sort=-committerdate',
-            '--format=%(refname)%x1f%(refname:short)%x1f%(HEAD)%x1f%(objectname)%x1f%(committerdate:iso-strict)',
+            "--format=%(refname)\t%(refname:short)\t%(HEAD)\t%(objectname)\t%(committerdate:iso-strict)",
             'refs/heads',
             'refs/remotes',
         ], $path));
@@ -130,7 +130,7 @@ class ProjectGitService
         $branchesByName = [];
         $lines = preg_split('/\R/u', $output, -1, PREG_SPLIT_NO_EMPTY) ?: [];
         foreach ($lines as $line) {
-            $parts = explode("\x1f", (string) $line);
+            $parts = explode("\t", (string) $line);
             if (count($parts) < 5) {
                 continue;
             }
@@ -237,6 +237,67 @@ class ProjectGitService
         $status = trim($this->run([$this->gitBinary(), 'status', '--porcelain'], $path));
 
         return $status !== '';
+    }
+
+    public function validateBranchName(string $path, string $branchName): void
+    {
+        $this->run([$this->gitBinary(), 'check-ref-format', '--branch', $branchName], $path);
+    }
+
+    public function branchExists(string $path, string $branchName): bool
+    {
+        try {
+            $this->run([$this->gitBinary(), 'show-ref', '--verify', '--quiet', 'refs/heads/'.$branchName], $path);
+
+            return true;
+        } catch (RuntimeException) {
+            return false;
+        }
+    }
+
+    public function createBranchFromCommit(string $path, string $branchName, string $commitHash): void
+    {
+        $this->run([$this->gitBinary(), 'checkout', '-b', $branchName, $commitHash], $path);
+    }
+
+    public function checkoutBranch(string $path, string $branchName): void
+    {
+        $this->run([$this->gitBinary(), 'checkout', $branchName], $path);
+    }
+
+    public function checkoutCommit(string $path, string $commitHash): void
+    {
+        $this->run([$this->gitBinary(), 'checkout', '--detach', $commitHash], $path);
+    }
+
+    public function currentBranch(string $path): ?string
+    {
+        $branch = trim($this->run([$this->gitBinary(), 'branch', '--show-current'], $path));
+
+        return $branch !== '' ? $branch : null;
+    }
+
+    public function fetchRemoteBranches(string $path, string $remoteUrl, ?string $token = null): string
+    {
+        $effectiveUrl = trim($token ?? '') !== ''
+            ? $this->buildAuthenticatedUrl($remoteUrl, (string) $token)
+            : $remoteUrl;
+        $extraEnv = $this->buildNetworkEnvForRemoteUrl($remoteUrl);
+        $args = [$this->gitBinary()];
+
+        if ($this->isLocalLikeRemoteHost($remoteUrl)) {
+            $args[] = '-c';
+            $args[] = 'http.proxy=';
+            $args[] = '-c';
+            $args[] = 'https.proxy=';
+        }
+
+        $args[] = 'fetch';
+        $args[] = '--prune';
+        $args[] = $effectiveUrl;
+        $args[] = '+refs/heads/*:refs/remotes/origin/*';
+
+        return $this->run($args, $path, null, $extraEnv);
     }
 
     /**
@@ -512,10 +573,7 @@ class ProjectGitService
                 continue;
             }
 
-            if (
-                preg_match('/^-{1,2}[A-Za-z0-9].*/', $value) === 1
-                || preg_match('/^[A-Za-z0-9._\\/-]+$/', $value) === 1
-            ) {
+            if (preg_match('/^[A-Za-z0-9._=:\\/-]+$/', $value) === 1) {
                 $parts[] = $value;
                 continue;
             }

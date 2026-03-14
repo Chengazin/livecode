@@ -196,6 +196,11 @@
           <p v-if="hasForgejoRepo" class="muted-text">
             {{ t("editor.gitRepoConnected", { repo: forgejoRepoFullName || t("editor.repositoryUnknown") }) }}
           </p>
+          <p v-if="forgejoRepoHtmlUrl" class="muted-text">
+            <a :href="forgejoRepoHtmlUrl" target="_blank" rel="noopener noreferrer">{{ t("editor.openForgejoRepo") }}</a>
+            ·
+            <a :href="forgejoGraphUrl" target="_blank" rel="noopener noreferrer">{{ t("editor.openForgejoGraph") }}</a>
+          </p>
 
           <form class="form-grid compact-form" @submit.prevent="emit('connect-project-forgejo')">
             <label class="field field-row">
@@ -284,11 +289,11 @@
 </template>
 
 <script setup>
-import { defineEmits, defineProps } from "vue";
+import { computed, defineEmits, defineProps } from "vue";
 import FileTree from "./FileTree.vue";
 import { avatarPresetStyles, defaultAvatarPreset } from "../../config/avatarPresets";
 
-defineProps({
+const props = defineProps({
   t: { type: Function, required: true },
   workspaceTitle: { type: String, default: "" },
   canManageProjectSettings: { type: Boolean, default: false },
@@ -337,6 +342,7 @@ defineProps({
   forgejoAccountConnected: { type: Boolean, default: false },
   hasForgejoRepo: { type: Boolean, default: false },
   forgejoRepoFullName: { type: String, default: "" },
+  forgejoRepoHtmlUrl: { type: String, default: "" },
   canCreatePullRequest: { type: Boolean, default: false },
   selectedProjectId: { type: [String, Number], default: "" },
 });
@@ -385,6 +391,15 @@ const emit = defineEmits([
   "update:forgejoPrBody",
   "update:forgejoPrMessage",
 ]);
+
+const forgejoGraphUrl = computed(() => {
+  const base = String(props.forgejoRepoHtmlUrl || "").trim().replace(/\/+$/, "");
+  if (!base) {
+    return "";
+  }
+
+  return `${base}/graph`;
+});
 
 function normalizeAvatarUrl(urlInput) {
   return typeof urlInput === "string" && urlInput.trim() !== "" ? urlInput.trim() : "";

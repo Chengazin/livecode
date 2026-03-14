@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use App\Models\Project;
-use App\Models\ProjectSnapshot;
 use App\Services\ForgejoService;
 use App\Services\ProjectAccessService;
 use App\Services\ProjectGitService;
@@ -154,18 +153,9 @@ class ProjectForgejoController extends Controller
 
         $data = $request->validate([
             'message' => ['nullable', 'string', 'max:255'],
-            'snapshot_id' => ['nullable', 'integer'],
         ]);
 
         $message = $data['message'] ?? null;
-
-        if ($data['snapshot_id'] ?? null) {
-            $snapshot = ProjectSnapshot::query()
-                ->where('project_id', $project->project_id)
-                ->findOrFail((int) $data['snapshot_id']);
-
-            $message = $snapshot->message ?: ('Snapshot #'.$snapshot->snapshot_id);
-        }
 
         if (! $message) {
             $message = 'Manual save '.now()->toDateTimeString();
@@ -178,6 +168,13 @@ class ProjectForgejoController extends Controller
             'name' => $user->name,
             'email' => $user->email,
         ];
+
+        $pushBranch = $git->currentBranch($repoPath);
+        if ($pushBranch === null) {
+            return response()->json([
+                'message' => 'Current workspace is on a detached commit. Create or switch to a branch before pushing to Forgejo.',
+            ], 409);
+        }
 
         $committed = $git->commitAll($repoPath, $message, $author, false);
 
@@ -203,7 +200,7 @@ class ProjectForgejoController extends Controller
                 $pushOutput = $git->push(
                     $repoPath,
                     $remoteUrl,
-                    $project->forgejo_default_branch ?: 'main',
+                    $pushBranch,
                     $user->forgejo_access_token,
                     $author
                 );
@@ -242,6 +239,7 @@ class ProjectForgejoController extends Controller
         return response()->json([
             'status' => 'pushed',
             'message' => $message,
+            'branch' => $pushBranch,
             'pushed_at' => $project->forgejo_last_push_at,
         ]);
     }
@@ -287,6 +285,13 @@ class ProjectForgejoController extends Controller
             'email' => $user->email,
         ];
 
+        $syncBranch = $git->currentBranch($repoPath);
+        if ($syncBranch === null) {
+            return response()->json([
+                'message' => 'Current workspace is on a detached commit. Create or switch to a branch before syncing with Forgejo.',
+            ], 409);
+        }
+
         $remoteUrls = $this->buildRepositoryCloneUrlCandidates(
             (string) ($project->forgejo_repo_full_name ?? ''),
             (string) ($project->forgejo_repo_clone_url ?? '')
@@ -309,7 +314,7 @@ class ProjectForgejoController extends Controller
                 $syncOutput = $git->pull(
                     $repoPath,
                     $remoteUrl,
-                    $project->forgejo_default_branch ?: 'main',
+                    $syncBranch,
                     $user->forgejo_access_token,
                     $author
                 );
@@ -321,6 +326,12 @@ class ProjectForgejoController extends Controller
                 if ($this->isLocalChangesGitError($lastSyncError)) {
                     return response()->json([
                         'message' => 'Local changes conflict with incoming updates. Commit, stash, or discard local changes and retry sync.',
+                    ], 409);
+                }
+
+                if ($this->isMissingRemoteBranchGitError($lastSyncError)) {
+                    return response()->json([
+                        'message' => 'Current branch does not exist in Forgejo yet. Push it first to publish the branch.',
                     ], 409);
                 }
 
@@ -737,6 +748,15 @@ class ProjectForgejoController extends Controller
         return str_contains($normalized, 'your local changes to the following files would be overwritten by merge')
             || str_contains($normalized, 'the following untracked working tree files would be overwritten by merge')
             || str_contains($normalized, 'please commit your changes or stash them before you merge');
+    }
+
+    private function isMissingRemoteBranchGitError(string $message): bool
+    {
+        $normalized = strtolower($message);
+
+        return str_contains($normalized, 'couldn\'t find remote ref')
+            || str_contains($normalized, 'could not find remote branch')
+            || str_contains($normalized, 'no such ref was fetched');
     }
 
     /**

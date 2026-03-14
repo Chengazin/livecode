@@ -58,11 +58,6 @@ class Project extends Model
         return $this->hasMany(ProjectInvitation::class, 'project_id', 'project_id');
     }
 
-    public function snapshots(): HasMany
-    {
-        return $this->hasMany(ProjectSnapshot::class, 'project_id', 'project_id');
-    }
-
     public function codeComments(): HasMany
     {
         return $this->hasMany(ProjectCodeComment::class, 'project_id', 'project_id');

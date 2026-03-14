@@ -4,10 +4,11 @@ namespace Tests\Feature;
 
 use App\Models\Project;
 use App\Models\ProjectParticipant;
-use App\Models\ProjectSnapshot;
 use App\Models\User;
+use App\Services\ProjectGitService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
+use Mockery\MockInterface;
 use Tests\TestCase;
 
 class ProjectInfoTest extends TestCase
@@ -33,36 +34,6 @@ class ProjectInfoTest extends TestCase
             'role' => ProjectParticipant::ROLE_VIEWER,
         ]);
 
-        ProjectSnapshot::query()->create([
-            'project_id' => $project->project_id,
-            'snapshot_hash' => str_repeat('a', 64),
-            'author_user_id' => $owner->user_id,
-            'message' => 'Owner update',
-            'snapshot_path' => '/tmp/a.zip',
-            'size_bytes' => 128,
-            'created_at' => now()->subDays(1),
-        ]);
-
-        ProjectSnapshot::query()->create([
-            'project_id' => $project->project_id,
-            'snapshot_hash' => str_repeat('b', 64),
-            'author_user_id' => $collaborator->user_id,
-            'message' => 'Collaborator update',
-            'snapshot_path' => '/tmp/b.zip',
-            'size_bytes' => 256,
-            'created_at' => now()->subDays(2),
-        ]);
-
-        ProjectSnapshot::query()->create([
-            'project_id' => $project->project_id,
-            'snapshot_hash' => str_repeat('c', 64),
-            'author_user_id' => $collaborator->user_id,
-            'message' => 'Old update',
-            'snapshot_path' => '/tmp/c.zip',
-            'size_bytes' => 256,
-            'created_at' => now()->subDays(70),
-        ]);
-
         $token = $collaborator->createToken('test')->plainTextToken;
 
         $response = $this->withToken($token)->getJson('/api/projects/'.$project->project_id.'/info?period_days=30');
@@ -73,8 +44,13 @@ class ProjectInfoTest extends TestCase
             ->assertJsonPath('permissions.effective_role', ProjectParticipant::ROLE_VIEWER)
             ->assertJsonPath('permissions.is_owner', false)
             ->assertJsonPath('participants.0.participant_id', $participant->participant_id)
-            ->assertJsonPath('participants.0.role', ProjectParticipant::ROLE_VIEWER)
-            ->assertJsonPath('stats.total_snapshots', 2);
+            ->assertJsonPath('participants.0.role', ProjectParticipant::ROLE_VIEWER);
+
+        $payload = $response->json();
+        $this->assertIsArray($payload['stats'] ?? null);
+        $this->assertArrayNotHasKey('total_snapshots', $payload['stats']);
+        $this->assertIsArray($payload['history'] ?? null);
+        $this->assertArrayNotHasKey('snapshots', $payload['history']);
 
         $response->assertJsonCount(3, 'roles');
     }
@@ -140,6 +116,96 @@ class ProjectInfoTest extends TestCase
         ]);
 
         $response->assertStatus(422);
+    }
+
+    public function test_project_info_fetches_remote_branches_for_connected_repository(): void
+    {
+        $owner = $this->createUser('owner-remote-branches@example.com');
+        $owner->forgejo_access_token = 'forgejo-token';
+        $owner->forgejo_connected_at = now();
+        $owner->save();
+
+        $project = Project::query()->create([
+            'name' => 'Remote branches',
+            'description' => 'graph data',
+            'owner_id' => $owner->user_id,
+            'project_path' => 'projects/remote-branches',
+            'is_public' => false,
+        ]);
+        $project->git_enabled = true;
+        $project->forgejo_repo_full_name = 'team/repo';
+        $project->forgejo_repo_clone_url = 'http://forgejo:3000/team/repo.git';
+        $project->forgejo_default_branch = 'main';
+        $project->save();
+
+        $this->mock(ProjectGitService::class, function (MockInterface $mock): void {
+            $mock->shouldReceive('isRepository')->once()->andReturn(true);
+            $mock->shouldReceive('hasChanges')->once()->andReturn(false);
+            $mock->shouldReceive('fetchRemoteBranches')
+                ->once()
+                ->withArgs(function (string $path, string $remoteUrl, ?string $token): bool {
+                    return str_contains($path, 'projects')
+                        && $remoteUrl === 'http://forgejo:3000/team/repo.git'
+                        && $token === 'forgejo-token';
+                })
+                ->andReturn('From http://forgejo:3000/team/repo');
+            $mock->shouldReceive('listBranches')->once()->andReturn([
+                [
+                    'name' => 'main',
+                    'ref_name' => 'main',
+                    'is_current' => true,
+                    'head_hash' => 'aaa111',
+                    'last_commit_at' => now()->subMinute()->toIso8601String(),
+                ],
+                [
+                    'name' => 'feature/api',
+                    'ref_name' => 'origin/feature/api',
+                    'is_current' => false,
+                    'head_hash' => 'bbb222',
+                    'last_commit_at' => now()->toIso8601String(),
+                ],
+            ]);
+            $mock->shouldReceive('listCommits')
+                ->times(3)
+                ->andReturnUsing(function (string $path, int $limit, ?string $ref = null): array {
+                    $normalizedRef = trim((string) $ref);
+
+                    if ($normalizedRef === 'origin/feature/api') {
+                        return [[
+                            'hash' => 'bbb222',
+                            'short_hash' => 'bbb222',
+                            'parents' => ['aaa111'],
+                            'author_name' => 'Owner',
+                            'author_email' => 'owner-remote-branches@example.com',
+                            'authored_at' => now()->toIso8601String(),
+                            'subject' => 'Feature branch commit',
+                            'decorations' => 'origin/feature/api',
+                        ]];
+                    }
+
+                    return [[
+                        'hash' => 'aaa111',
+                        'short_hash' => 'aaa111',
+                        'parents' => [],
+                        'author_name' => 'Owner',
+                        'author_email' => 'owner-remote-branches@example.com',
+                        'authored_at' => now()->subMinute()->toIso8601String(),
+                        'subject' => 'Main branch commit',
+                        'decorations' => 'main',
+                    ]];
+                });
+        });
+
+        $token = $owner->createToken('test')->plainTextToken;
+
+        $response = $this->withToken($token)->getJson('/api/projects/'.$project->project_id.'/info');
+
+        $response
+            ->assertOk()
+            ->assertJsonPath('history.git.tree_available', true)
+            ->assertJsonCount(2, 'history.git.branches')
+            ->assertJsonFragment(['name' => 'feature/api'])
+            ->assertJsonFragment(['ref_name' => 'origin/feature/api']);
     }
 
     private function createUser(string $email): User

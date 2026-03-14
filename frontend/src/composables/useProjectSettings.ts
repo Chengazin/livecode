@@ -37,7 +37,6 @@ export function useProjectSettings(options) {
     return {
       period_days: Number.isFinite(Number(periodDays)) ? Number(periodDays) : 30,
       total_commits: 0,
-      total_snapshots: 0,
       contributors: [],
       timeline: [],
     };
@@ -54,7 +53,6 @@ export function useProjectSettings(options) {
     return {
       period_days: safePeriodDays,
       total_commits: Math.max(0, Number(source.total_commits || 0)),
-      total_snapshots: Math.max(0, Number(source.total_snapshots || 0)),
       contributors: contributors
         .map((entry) => ({
           ...entry,
@@ -62,7 +60,6 @@ export function useProjectSettings(options) {
           name: String(entry?.name || ""),
           email: String(entry?.email || ""),
           commit_count: Math.max(0, Number(entry?.commit_count || 0)),
-          snapshot_count: Math.max(0, Number(entry?.snapshot_count || 0)),
           last_activity_at: entry?.last_activity_at ? String(entry.last_activity_at) : "",
         }))
         .filter((entry) => entry.key !== "" || entry.name !== ""),
@@ -70,7 +67,6 @@ export function useProjectSettings(options) {
         .map((point) => ({
           date: String(point?.date || ""),
           commits: Math.max(0, Number(point?.commits || 0)),
-          snapshots: Math.max(0, Number(point?.snapshots || 0)),
         }))
         .filter((point) => point.date !== ""),
     };
@@ -125,7 +121,6 @@ export function useProjectSettings(options) {
         query: {
           period_days: safePeriod,
           commit_limit: 200,
-          snapshot_limit: 200,
         },
       });
 

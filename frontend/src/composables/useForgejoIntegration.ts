@@ -129,9 +129,14 @@ export function useForgejoIntegration(options) {
         body,
       });
 
-      notice.value = response.data?.status === "nothing_to_commit"
-        ? t("editor.nothingToCommit")
-        : t("editor.pushed");
+      if (response.data?.status === "nothing_to_commit") {
+        notice.value = t("editor.nothingToCommit");
+      } else {
+        const branchName = String(response.data?.branch || "").trim();
+        notice.value = branchName !== ""
+          ? t("editor.pushedBranch", { branch: branchName })
+          : t("editor.pushed");
+      }
     } catch (pushError) {
       error.value = readError(pushError);
     } finally {

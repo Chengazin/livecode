@@ -131,7 +131,7 @@
         </div>
 
         <p class="muted-text">
-          {{ t("editor.projectStatsSummary", { commits: safeStats.total_commits, snapshots: safeStats.total_snapshots }) }}
+          {{ t("editor.projectStatsSummary", { commits: safeStats.total_commits }) }}
         </p>
 
         <p v-if="statsLoading" class="muted-text">{{ t("editor.projectStatsLoading") }}</p>
@@ -142,7 +142,6 @@
             <div v-for="point in statsTimeline" :key="point.date" class="project-info-timeline-item">
               <div class="project-info-timeline-bars">
                 <span class="project-info-timeline-bar project-info-timeline-bar--commits" :style="{ height: `${point.commitsHeight}%` }" />
-                <span class="project-info-timeline-bar project-info-timeline-bar--snapshots" :style="{ height: `${point.snapshotsHeight}%` }" />
               </div>
               <small>{{ formatShortDate(point.date) }}</small>
             </div>
@@ -150,7 +149,6 @@
 
           <p v-if="statsTimeline.length > 0" class="muted-text project-info-timeline-legend">
             <span><i class="project-info-legend-dot project-info-legend-dot--commits" />{{ t("projectInfo.legendCommits") }}</span>
-            <span><i class="project-info-legend-dot project-info-legend-dot--snapshots" />{{ t("projectInfo.legendSnapshots") }}</span>
           </p>
 
           <div v-if="safeStats.contributors.length === 0" class="muted-text">{{ t("projectInfo.noStats") }}</div>
@@ -162,7 +160,6 @@
               </div>
               <div class="project-info-stats-values">
                 <span>{{ t("projectInfo.commitCount", { count: entry.commit_count }) }}</span>
-                <span>{{ t("projectInfo.snapshotCount", { count: entry.snapshot_count }) }}</span>
                 <span v-if="entry.last_activity_at">{{ formatDateTime(entry.last_activity_at) }}</span>
               </div>
             </div>
@@ -360,7 +357,6 @@ const safeStats = computed(() => {
 
   return {
     total_commits: Math.max(0, Number(source.total_commits || 0)),
-    total_snapshots: Math.max(0, Number(source.total_snapshots || 0)),
     contributors: Array.isArray(source.contributors) ? source.contributors : [],
     timeline: Array.isArray(source.timeline) ? source.timeline : [],
   };
@@ -371,7 +367,6 @@ const statsTimeline = computed(() => {
     .map((point) => ({
       date: String(point?.date || ""),
       commits: Math.max(0, Number(point?.commits || 0)),
-      snapshots: Math.max(0, Number(point?.snapshots || 0)),
     }))
     .filter((point) => point.date !== "");
 
@@ -379,13 +374,12 @@ const statsTimeline = computed(() => {
     return [];
   }
 
-  const maxValue = points.reduce((max, point) => Math.max(max, point.commits, point.snapshots), 0);
+  const maxValue = points.reduce((max, point) => Math.max(max, point.commits), 0);
   const normalizedMax = maxValue > 0 ? maxValue : 1;
 
   return points.map((point) => ({
     ...point,
     commitsHeight: point.commits > 0 ? Math.max(8, Math.round((point.commits / normalizedMax) * 100)) : 0,
-    snapshotsHeight: point.snapshots > 0 ? Math.max(8, Math.round((point.snapshots / normalizedMax) * 100)) : 0,
   }));
 });
 

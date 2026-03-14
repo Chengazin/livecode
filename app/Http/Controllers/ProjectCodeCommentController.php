@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\ProjectRealtimeEvent;
 use App\Models\Project;
 use App\Models\ProjectCodeComment;
 use App\Models\User;
@@ -82,10 +83,20 @@ class ProjectCodeCommentController extends Controller
         ]);
 
         $comment->loadMissing('author:user_id,name,email,avatar_type,avatar_preset,avatar_path');
+        $serialized = $this->serializeComment($comment);
+        $this->broadcastSafely(new ProjectRealtimeEvent(
+            $project->project_id,
+            (int) $user->user_id,
+            'realtime.code_comment.updated',
+            [
+                'action' => 'created',
+                'comment' => $serialized,
+            ]
+        ));
 
         return response()->json([
             'status' => 'ok',
-            'comment' => $this->serializeComment($comment),
+            'comment' => $serialized,
         ], 201);
     }
 
@@ -117,9 +128,36 @@ class ProjectCodeCommentController extends Controller
             return response()->json(['message' => 'Access denied.'], 403);
         }
 
+        $deletedComment = [
+            'comment_id' => (int) $comment->comment_id,
+            'path' => (string) $comment->path,
+            'line_number' => max(1, (int) $comment->line_number),
+        ];
+
         $comment->delete();
+        $this->broadcastSafely(new ProjectRealtimeEvent(
+            $project->project_id,
+            (int) $user->user_id,
+            'realtime.code_comment.updated',
+            [
+                'action' => 'deleted',
+                'comment_id' => (int) $deletedComment['comment_id'],
+                'path' => (string) $deletedComment['path'],
+                'line_number' => (int) $deletedComment['line_number'],
+                'comment' => $deletedComment,
+            ]
+        ));
 
         return response()->noContent();
+    }
+
+    private function broadcastSafely(object $event): void
+    {
+        try {
+            event($event);
+        } catch (\Throwable) {
+            // Broadcast transport should not break API response paths.
+        }
     }
 
     /**
