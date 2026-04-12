@@ -3,6 +3,7 @@ namespace App\Http\Controllers;
 use App\Mail\RegistrationVerificationCodeMail;
 use App\Models\RegistrationVerification;
 use App\Models\User;
+use App\Services\CaptchaService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
@@ -32,9 +33,24 @@ class AuthController extends Controller
             'email' => ['required', 'string', 'email', 'max:255', 'unique:users,email'],
             'password' => ['required', 'string', 'min:8', 'max:255'],
             'language' => ['sometimes', 'string', 'in:rus,eng'],
+            'captcha_token' => ['sometimes', 'string'],
         ]);
 
         try {
+            // Verify captcha if enabled
+            if (config('captcha.verify_on.registration_initiate') && CaptchaService::isEnabled()) {
+                if (!CaptchaService::verify($data['captcha_token'] ?? '', $request->ip())) {
+                    Log::warning('Registration initiate: captcha verification failed', [
+                        'email' => $data['email'],
+                        'ip' => $request->ip(),
+                    ]);
+
+                    return response()->json([
+                        'message' => 'Captcha verification failed. Please try again.',
+                    ], 422);
+                }
+            }
+
             // Delete any existing verification records for this email
             RegistrationVerification::query()->where('email', $data['email'])->delete();
 
@@ -220,6 +236,20 @@ class AuthController extends Controller
                 'message' => 'Failed to resend verification code. Please try again.',
             ], 500);
         }
+    }
+
+    /**
+     * Get captcha site key for the frontend
+     *
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getCaptchaConfig()
+    {
+        return response()->json([
+            'enabled' => CaptchaService::isEnabled(),
+            'provider' => config('captcha.provider'),
+            'site_key' => CaptchaService::getSiteKey(),
+        ]);
     }
 
     /**
