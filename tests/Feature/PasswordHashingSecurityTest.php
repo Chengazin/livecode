@@ -2,8 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Models\RegistrationVerification;
 use App\Models\User;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
 use Tests\TestCase;
 
 class PasswordHashingSecurityTest extends TestCase
@@ -85,22 +87,41 @@ class PasswordHashingSecurityTest extends TestCase
      */
     public function test_registration_hashes_password_with_salt()
     {
+        Mail::fake();
+
         $payload = [
             'name' => 'New User',
             'email' => 'newuser@example.com',
             'password' => 'SecurePassword123!',
             'language' => 'rus',
-            'device_name' => 'test-device',
         ];
 
-        $response = $this->postJson('/api/auth/register', $payload);
+        $initiateResponse = $this->postJson('/api/auth/register/initiate', $payload);
 
-        $response->assertCreated();
+        $initiateResponse->assertStatus(202)->assertJsonStructure([
+            'registration_verification_id',
+            'email',
+        ]);
 
-        $user = User::query()->where('email', $payload['email'])->first();
+        $verificationId = (int) $initiateResponse->json('registration_verification_id');
+        $verification = RegistrationVerification::query()->find($verificationId);
+
+        $this->assertNotNull($verification);
+        $this->assertNotEquals($payload['password'], $verification->password_hash);
+        $this->assertStringStartsWith('$2y$', $verification->password_hash);
+        $this->assertTrue(Hash::check($payload['password'], $verification->password_hash));
+
+        $verifyResponse = $this->postJson('/api/auth/register/verify', [
+            'registration_verification_id' => $verificationId,
+            'verification_code' => $verification->verification_code,
+            'device_name' => 'test-device',
+        ]);
+
+        $verifyResponse->assertCreated();
+
+        $user = User::query()->where('email', $payload['email'])->firstOrFail();
 
         // Verify user was created with hashed password
-        $this->assertNotNull($user);
         $this->assertNotEquals($payload['password'], $user->password_hash);
 
         // Verify password starts with bcrypt prefix

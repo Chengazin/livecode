@@ -482,20 +482,27 @@ class PtyManager {
         return;
       }
 
-      const output = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk || "");
-      if (!output) {
+      const outputBuffer = Buffer.isBuffer(chunk)
+        ? chunk
+        : Buffer.from(String(chunk || ""), "utf8");
+
+      if (outputBuffer.length === 0) {
         return;
       }
 
       const maxBytes = this.config.maxOutputChunkBytes;
       let cursor = 0;
 
-      while (cursor < output.length) {
-        const slice = output.slice(cursor, cursor + maxBytes);
+      while (cursor < outputBuffer.length) {
+        // Slice buffer by byte length instead of character count
+        // to prevent splitting multibyte UTF-8 sequences
+        const slice = outputBuffer.slice(cursor, cursor + maxBytes);
+        const data = slice.toString("utf8");
+
         this.broadcast(session, {
           type: "output",
           terminal_session_id: session.id,
-          data: slice,
+          data: data,
         });
 
         cursor += maxBytes;

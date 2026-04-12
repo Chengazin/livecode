@@ -4,7 +4,6 @@ namespace App\Models;
 
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Str;
 
 class RegistrationVerification extends Model
 {
@@ -37,7 +36,7 @@ class RegistrationVerification extends Model
      */
     public static function generateCode(): string
     {
-        return Str::random(6, '0123456789');
+        return (string) random_int(100000, 999999);
     }
 
     /**
@@ -112,4 +111,3 @@ class RegistrationVerification extends Model
         return $this->expires_at && $this->expires_at->isPast();
     }
 }
-

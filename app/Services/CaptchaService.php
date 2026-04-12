@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -15,15 +14,81 @@ class CaptchaService
     {
         $provider = config('captcha.provider');
 
-        if ($provider === 'disabled' || !$token) {
+        if (!self::isEnabled()) {
             return true;
         }
 
+        $token = trim($token);
+        if ($token === '') {
+            Log::warning('Captcha verification failed: empty token', [
+                'provider' => $provider,
+            ]);
+            return false;
+        }
+
         return match ($provider) {
+            'yandex-smartcaptcha' => self::verifyYandexSmartCaptcha($token, $remoteIp),
             'cloudflare-turnstile' => self::verifyTurnstile($token, $remoteIp),
             'recaptcha' => self::verifyRecaptcha($token, $remoteIp),
-            default => true,
+            default => false,
         };
+    }
+
+    /**
+     * Verify Yandex SmartCaptcha token
+     */
+    private static function verifyYandexSmartCaptcha(string $token, ?string $remoteIp = null): bool
+    {
+        if (!config('captcha.yandex_smartcaptcha.enabled')) {
+            return true;
+        }
+
+        $secretKey = config('captcha.yandex_smartcaptcha.secret_key');
+
+        if (!$secretKey || !$token) {
+            Log::warning('Yandex SmartCaptcha verification failed: missing configuration or token');
+            return false;
+        }
+
+        try {
+            $query = [
+                'secret' => $secretKey,
+                'token' => $token,
+            ];
+
+            if ($remoteIp) {
+                $query['ip'] = $remoteIp;
+            }
+
+            $response = Http::timeout(10)->get(
+                'https://smartcaptcha.yandexcloud.net/validate',
+                $query
+            );
+
+            if (!$response->successful()) {
+                Log::warning('Yandex SmartCaptcha API returned error', [
+                    'status' => $response->status(),
+                    'response' => $response->body(),
+                ]);
+                return false;
+            }
+
+            $data = $response->json();
+            if (($data['status'] ?? '') !== 'ok') {
+                Log::info('Yandex SmartCaptcha verification failed', [
+                    'status' => $data['status'] ?? 'unknown',
+                    'message' => $data['message'] ?? null,
+                ]);
+                return false;
+            }
+
+            return true;
+        } catch (\Exception $e) {
+            Log::error('Yandex SmartCaptcha verification exception', [
+                'error' => $e->getMessage(),
+            ]);
+            return false;
+        }
     }
 
     /**
@@ -147,6 +212,7 @@ class CaptchaService
         $provider = config('captcha.provider');
 
         return match ($provider) {
+            'yandex-smartcaptcha' => config('captcha.yandex_smartcaptcha.site_key'),
             'cloudflare-turnstile' => config('captcha.turnstile.site_key'),
             'recaptcha' => config('captcha.recaptcha.site_key'),
             default => null,
@@ -158,6 +224,19 @@ class CaptchaService
      */
     public static function isEnabled(): bool
     {
-        return config('captcha.provider') !== 'disabled';
+        $provider = config('captcha.provider');
+
+        return match ($provider) {
+            'yandex-smartcaptcha' => (bool) config('captcha.yandex_smartcaptcha.enabled')
+                && trim((string) config('captcha.yandex_smartcaptcha.site_key', '')) !== ''
+                && trim((string) config('captcha.yandex_smartcaptcha.secret_key', '')) !== '',
+            'cloudflare-turnstile' => (bool) config('captcha.turnstile.enabled')
+                && trim((string) config('captcha.turnstile.site_key', '')) !== ''
+                && trim((string) config('captcha.turnstile.secret_key', '')) !== '',
+            'recaptcha' => (bool) config('captcha.recaptcha.enabled')
+                && trim((string) config('captcha.recaptcha.site_key', '')) !== ''
+                && trim((string) config('captcha.recaptcha.secret_key', '')) !== '',
+            default => false,
+        };
     }
 }

@@ -1,5 +1,18 @@
 <?php
 
+$turnstileEnabled = filter_var((string) env('TURNSTILE_ENABLED', 'false'), FILTER_VALIDATE_BOOL);
+$recaptchaEnabled = filter_var((string) env('RECAPTCHA_ENABLED', 'false'), FILTER_VALIDATE_BOOL);
+$yandexSmartCaptchaEnabled = filter_var((string) env('YANDEX_SMARTCAPTCHA_ENABLED', 'false'), FILTER_VALIDATE_BOOL);
+
+$captchaProvider = (string) env('CAPTCHA_PROVIDER', '');
+if ($captchaProvider === '') {
+    $captchaProvider = $yandexSmartCaptchaEnabled
+        ? 'yandex-smartcaptcha'
+        : ($turnstileEnabled
+            ? 'cloudflare-turnstile'
+            : ($recaptchaEnabled ? 'recaptcha' : 'disabled'));
+}
+
 return [
 
     /*
@@ -9,11 +22,11 @@ return [
     |
     | Configure which captcha service to use.
     |
-    | Supported: "cloudflare-turnstile", "recaptcha", "disabled"
+    | Supported: "yandex-smartcaptcha", "cloudflare-turnstile", "recaptcha", "disabled"
     |
     */
 
-    'provider' => env('CAPTCHA_PROVIDER', 'disabled'),
+    'provider' => $captchaProvider,
 
     /*
     |--------------------------------------------------------------------------
@@ -30,7 +43,23 @@ return [
     'turnstile' => [
         'site_key' => env('TURNSTILE_SITE_KEY'),
         'secret_key' => env('TURNSTILE_SECRET_KEY'),
-        'enabled' => env('TURNSTILE_ENABLED', false),
+        'enabled' => $turnstileEnabled,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Yandex SmartCaptcha Configuration
+    |--------------------------------------------------------------------------
+    |
+    | Yandex SmartCaptcha works well with Russian traffic and local hosting.
+    | Get keys in Yandex Cloud console.
+    |
+    */
+
+    'yandex_smartcaptcha' => [
+        'site_key' => env('YANDEX_SMARTCAPTCHA_SITE_KEY'),
+        'secret_key' => env('YANDEX_SMARTCAPTCHA_SECRET_KEY'),
+        'enabled' => $yandexSmartCaptchaEnabled,
     ],
 
     /*
@@ -48,7 +77,7 @@ return [
     'recaptcha' => [
         'site_key' => env('RECAPTCHA_SITE_KEY'),
         'secret_key' => env('RECAPTCHA_SECRET_KEY'),
-        'enabled' => env('RECAPTCHA_ENABLED', false),
+        'enabled' => $recaptchaEnabled,
         'threshold' => env('RECAPTCHA_THRESHOLD', 0.5),  // For v3, score threshold
     ],
 

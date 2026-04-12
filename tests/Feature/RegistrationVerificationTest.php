@@ -51,6 +51,7 @@ class RegistrationVerificationTest extends TestCase
 
         $this->assertNotEquals($payload['password'], $verification->password_hash);
         $this->assertStringStartsWith('$2y$', $verification->password_hash);
+        $this->assertMatchesRegularExpression('/^\d{6}$/', (string) $verification->verification_code);
     }
 
     /**
@@ -93,6 +94,34 @@ class RegistrationVerificationTest extends TestCase
 
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['password']);
+    }
+
+    /**
+     * Test that captcha token is required when captcha is enabled
+     */
+    public function test_register_initiate_requires_captcha_token_when_captcha_enabled()
+    {
+        config([
+            'captcha.provider' => 'yandex-smartcaptcha',
+            'captcha.yandex_smartcaptcha.enabled' => true,
+            'captcha.yandex_smartcaptcha.site_key' => 'test-site-key',
+            'captcha.yandex_smartcaptcha.secret_key' => 'test-secret-key',
+            'captcha.verify_on.registration_initiate' => true,
+        ]);
+
+        $payload = [
+            'name' => 'Test User',
+            'email' => 'captcha-required@example.com',
+            'password' => 'SecurePassword123!',
+            'language' => 'rus',
+        ];
+
+        $response = $this->postJson('/api/auth/register/initiate', $payload);
+
+        $response->assertStatus(422);
+        $response->assertJson([
+            'message' => 'Captcha verification failed. Please try again.',
+        ]);
     }
 
     /**

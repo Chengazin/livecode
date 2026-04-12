@@ -67,6 +67,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('projects/{projectId}/code-comments', [ProjectCodeCommentController::class, 'store']);
     Route::delete('projects/{projectId}/code-comments/{commentId}', [ProjectCodeCommentController::class, 'destroy']);
     Route::post('projects/{projectId}/terminal/sessions', [ProjectTerminalController::class, 'store']);
+    Route::get('projects/{projectId}/terminal/sessions', [ProjectTerminalController::class, 'index']);
     Route::post('projects/{projectId}/terminal/sessions/{terminalSessionId}/ticket', [ProjectTerminalController::class, 'ticket']);
     Route::post('projects/{projectId}/terminal/sessions/{terminalSessionId}/close', [ProjectTerminalController::class, 'close']);
 
