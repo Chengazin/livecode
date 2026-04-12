@@ -3,7 +3,8 @@
     <section class="card form-card">
       <h1>{{ t("register.title") }}</h1>
 
-      <form class="form-grid" @submit.prevent="handleSubmit">
+      <!-- Step 1: Initial Registration -->
+      <form v-if="step === 1" class="form-grid" @submit.prevent="handleInitiateRegister">
         <label class="field">
           <span>{{ t("register.name") }}</span>
           <input v-model.trim="form.name" type="text" required autocomplete="name" />
@@ -28,8 +29,8 @@
         <label class="field">
           <span>{{ t("register.language") }}</span>
           <select v-model="form.language" required>
-            <option value="rus">rus</option>
-            <option value="eng">eng</option>
+            <option value="rus">Русский</option>
+            <option value="eng">English</option>
           </select>
         </label>
 
@@ -39,12 +40,34 @@
           {{ loading ? t("register.submitting") : t("register.submit") }}
         </button>
       </form>
+
+      <!-- Step 2: Email Verification -->
+      <form v-if="step === 2" class="form-grid" @submit.prevent="handleVerifyCode">
+        <p class="muted-text">{{ t("register.verificationSent", { email: form.email }) }}</p>
+
+        <label class="field">
+          <span>{{ t("register.verificationCode") }}</span>
+          <input v-model.trim="form.code" type="text" required maxlength="6" placeholder="000000" />
+        </label>
+
+        <p v-if="errorMessage" class="error-banner field-row">{{ errorMessage }}</p>
+
+        <div class="field-row field-buttons">
+          <button class="btn" type="submit" :disabled="loading">
+            {{ loading ? t("register.verifying") : t("register.verify") }}
+          </button>
+          <button class="btn btn-secondary" type="button" @click="handleResendCode" :disabled="loading || resendCooldown > 0">
+            {{ resendCooldown > 0 ? `${t("register.resendIn")} ${resendCooldown}s` : t("register.resendCode") }}
+          </button>
+          <button class="btn btn-ghost" type="button" @click="step = 1">{{ t("common.back") }}</button>
+        </div>
+      </form>
     </section>
   </div>
 </template>
 
 <script setup>
-import { reactive, ref } from "vue";
+import { reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute } from "vue-router";
 import { useRouter } from "vue-router";
@@ -55,13 +78,17 @@ import { getAutoDeviceName } from "../services/device";
 const router = useRouter();
 const route = useRoute();
 const { t } = useI18n();
+
+const step = ref(1);  // 1 = initial, 2 = verification
 const loading = ref(false);
 const errorMessage = ref("");
+const resendCooldown = ref(0);
 
 const form = reactive({
   name: "",
   email: "",
   password: "",
+  code: "",
   language: "rus",
 });
 
@@ -93,7 +120,34 @@ function resolveRedirectPath() {
   return "/projects";
 }
 
-async function handleSubmit() {
+async function handleInitiateRegister() {
+  loading.value = true;
+  errorMessage.value = "";
+
+  try {
+    await request({
+      method: "POST",
+      path: "/auth/register/initiate",
+      auth: false,
+      body: {
+        name: form.name,
+        email: form.email,
+        password: form.password,
+        language: form.language || "rus",
+      },
+    });
+
+    // Move to verification step
+    step.value = 2;
+    resendCooldown.value = 0;
+  } catch (error) {
+    errorMessage.value = resolveErrorMessage(error);
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function handleVerifyCode() {
   loading.value = true;
   errorMessage.value = "";
 
@@ -101,13 +155,11 @@ async function handleSubmit() {
     const deviceName = getAutoDeviceName();
     const response = await request({
       method: "POST",
-      path: "/auth/register",
+      path: "/auth/register/verify",
       auth: false,
       body: {
-        name: form.name,
         email: form.email,
-        password: form.password,
-        language: form.language || "rus",
+        code: form.code,
         device_name: deviceName,
       },
     });
@@ -121,6 +173,35 @@ async function handleSubmit() {
 
     saveSession(token, user);
     router.push(resolveRedirectPath());
+  } catch (error) {
+    errorMessage.value = resolveErrorMessage(error);
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function handleResendCode() {
+  loading.value = true;
+  errorMessage.value = "";
+
+  try {
+    await request({
+      method: "POST",
+      path: "/auth/register/resend-code",
+      auth: false,
+      body: {
+        email: form.email,
+      },
+    });
+
+    // Start cooldown
+    resendCooldown.value = 60;
+    const timer = setInterval(() => {
+      resendCooldown.value--;
+      if (resendCooldown.value <= 0) {
+        clearInterval(timer);
+      }
+    }, 1000);
   } catch (error) {
     errorMessage.value = resolveErrorMessage(error);
   } finally {

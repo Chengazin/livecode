@@ -18,6 +18,7 @@ use App\Http\Controllers\ProjectSpeechController;
 use App\Http\Controllers\ProjectTerminalController;
 use App\Http\Controllers\ProjectFilesystemController;
 use App\Http\Controllers\ProjectCodeCommentController;
+use App\Http\Controllers\ProjectTaskController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
@@ -65,10 +66,23 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('projects/{projectId}/code-comments', [ProjectCodeCommentController::class, 'index']);
     Route::post('projects/{projectId}/code-comments', [ProjectCodeCommentController::class, 'store']);
     Route::delete('projects/{projectId}/code-comments/{commentId}', [ProjectCodeCommentController::class, 'destroy']);
-    Route::get('projects/{projectId}/terminal/sessions', [ProjectTerminalController::class, 'index']);
     Route::post('projects/{projectId}/terminal/sessions', [ProjectTerminalController::class, 'store']);
     Route::post('projects/{projectId}/terminal/sessions/{terminalSessionId}/ticket', [ProjectTerminalController::class, 'ticket']);
     Route::post('projects/{projectId}/terminal/sessions/{terminalSessionId}/close', [ProjectTerminalController::class, 'close']);
+
+    // Project Tasks
+    Route::get('projects/{projectId}/tasks/stats', [ProjectTaskController::class, 'getStats']);
+    Route::get('projects/{projectId}/tasks', [ProjectTaskController::class, 'index']);
+    Route::post('projects/{projectId}/tasks', [ProjectTaskController::class, 'store']);
+    Route::get('projects/{projectId}/tasks/{projectTaskId}', [ProjectTaskController::class, 'show']);
+    Route::patch('projects/{projectId}/tasks/{projectTaskId}', [ProjectTaskController::class, 'update']);
+    Route::post('projects/{projectId}/tasks/{projectTaskId}/assign', [ProjectTaskController::class, 'assignTask']);
+    Route::post('projects/{projectId}/tasks/{projectTaskId}/start', [ProjectTaskController::class, 'startTask']);
+    Route::post('projects/{projectId}/tasks/{projectTaskId}/complete', [ProjectTaskController::class, 'completeTask']);
+    Route::post('projects/{projectId}/tasks/{projectTaskId}/close', [ProjectTaskController::class, 'closeTask']);
+    Route::post('projects/{projectId}/tasks/{projectTaskId}/unassign', [ProjectTaskController::class, 'unassignTask']);
+    Route::delete('projects/{projectId}/tasks/{projectTaskId}', [ProjectTaskController::class, 'destroy']);
+
     Route::post('project-invitations/accept', [ProjectInvitationController::class, 'accept'])->middleware('throttle:invitation-accept');
     Route::apiResource('project-participants', ProjectParticipantController::class);
     Route::apiResource('project-invitations', ProjectInvitationController::class);
