@@ -6,6 +6,8 @@ use App\Events\ProjectRealtimeEvent;
 use App\Models\Project;
 use App\Models\User;
 use App\Services\ProjectAccessService;
+use Illuminate\Contracts\Cache\LockProvider;
+use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -57,35 +59,50 @@ class ProjectRealtimeController extends Controller
         ]);
 
         $key = $this->presenceKey($project->project_id);
-        $entries = Cache::get($key, []);
-        if (! is_array($entries)) {
-            $entries = [];
+
+        try {
+            [$entries, $current] = $this->withRealtimeCacheLock(
+                $this->presenceLockKey($project->project_id),
+                function () use ($key, $user, $data): array {
+                    $entries = Cache::get($key, []);
+                    if (! is_array($entries)) {
+                        $entries = [];
+                    }
+
+                    $entries[(string) $user->user_id] = [
+                        'user_id' => (int) $user->user_id,
+                        'name' => (string) ($user->name ?: $user->email ?: 'User #'.$user->user_id),
+                        'avatar_preset' => $this->normalizeAvatarPreset($user->avatar_preset),
+                        'avatar_url' => $this->resolveAvatarUrl($user),
+                        'path' => array_key_exists('path', $data) ? (string) ($data['path'] ?? '') : '',
+                        'cursor_row' => array_key_exists('cursor_row', $data) ? $data['cursor_row'] : null,
+                        'cursor_column' => array_key_exists('cursor_column', $data) ? $data['cursor_column'] : null,
+                        'selection_start_row' => array_key_exists('selection_start_row', $data) ? $data['selection_start_row'] : null,
+                        'selection_start_column' => array_key_exists('selection_start_column', $data) ? $data['selection_start_column'] : null,
+                        'selection_end_row' => array_key_exists('selection_end_row', $data) ? $data['selection_end_row'] : null,
+                        'selection_end_column' => array_key_exists('selection_end_column', $data) ? $data['selection_end_column'] : null,
+                        'seen_at' => now()->timestamp,
+                    ];
+
+                    $entries = $this->prunePresence($entries);
+
+                    Cache::put(
+                        $key,
+                        $entries,
+                        now()->addSeconds(self::PRESENCE_TTL_SECONDS + 5)
+                    );
+
+                    $current = $entries[(string) $user->user_id] ?? null;
+
+                    return [$entries, is_array($current) ? $current : null];
+                }
+            );
+        } catch (LockTimeoutException) {
+            return response()->json([
+                'message' => 'Realtime presence is busy, please retry.',
+            ], 423);
         }
 
-        $entries[(string) $user->user_id] = [
-            'user_id' => (int) $user->user_id,
-            'name' => (string) ($user->name ?: $user->email ?: 'User #'.$user->user_id),
-            'avatar_preset' => $this->normalizeAvatarPreset($user->avatar_preset),
-            'avatar_url' => $this->resolveAvatarUrl($user),
-            'path' => array_key_exists('path', $data) ? (string) ($data['path'] ?? '') : '',
-            'cursor_row' => array_key_exists('cursor_row', $data) ? $data['cursor_row'] : null,
-            'cursor_column' => array_key_exists('cursor_column', $data) ? $data['cursor_column'] : null,
-            'selection_start_row' => array_key_exists('selection_start_row', $data) ? $data['selection_start_row'] : null,
-            'selection_start_column' => array_key_exists('selection_start_column', $data) ? $data['selection_start_column'] : null,
-            'selection_end_row' => array_key_exists('selection_end_row', $data) ? $data['selection_end_row'] : null,
-            'selection_end_column' => array_key_exists('selection_end_column', $data) ? $data['selection_end_column'] : null,
-            'seen_at' => now()->timestamp,
-        ];
-
-        $entries = $this->prunePresence($entries);
-
-        Cache::put(
-            $key,
-            $entries,
-            now()->addSeconds(self::PRESENCE_TTL_SECONDS + 5)
-        );
-
-        $current = $entries[(string) $user->user_id] ?? null;
         if (is_array($current)) {
             $this->broadcastSafely(new ProjectRealtimeEvent(
                 $project->project_id,
@@ -125,12 +142,6 @@ class ProjectRealtimeController extends Controller
         }
 
         $entries = $this->prunePresence($entries);
-
-        Cache::put(
-            $this->presenceKey($project->project_id),
-            $entries,
-            now()->addSeconds(self::PRESENCE_TTL_SECONDS + 5)
-        );
 
         return response()->json([
             'status' => 'ok',
@@ -217,33 +228,48 @@ class ProjectRealtimeController extends Controller
             return response()->json(['message' => 'Message cannot be empty.'], 422);
         }
 
-        $seqKey = $this->chatSeqKey($project->project_id);
-        Cache::add($seqKey, 0, now()->addSeconds(self::CHAT_TTL_SECONDS));
-        $messageId = (int) Cache::increment($seqKey);
-
-        $entry = $this->formatChatEntry([
-            'id' => $messageId,
-            'user_id' => (int) $user->user_id,
-            'user_name' => (string) ($user->name ?: $user->email ?: 'User #'.$user->user_id),
-            'avatar_preset' => $this->normalizeAvatarPreset($user->avatar_preset),
-            'avatar_url' => $this->resolveAvatarUrl($user),
-            'message' => $text,
-            'created_at' => now()->toISOString(),
-        ]);
-
         $key = $this->chatKey($project->project_id);
-        $messages = Cache::get($key, []);
-        if (! is_array($messages)) {
-            $messages = [];
+        $seqKey = $this->chatSeqKey($project->project_id);
+
+        try {
+            $entry = $this->withRealtimeCacheLock(
+                $this->chatLockKey($project->project_id),
+                function () use ($seqKey, $key, $user, $text): array {
+                    Cache::add($seqKey, 0, now()->addSeconds(self::CHAT_TTL_SECONDS));
+                    $messageId = (int) Cache::increment($seqKey);
+
+                    $entry = $this->formatChatEntry([
+                        'id' => $messageId,
+                        'user_id' => (int) $user->user_id,
+                        'user_name' => (string) ($user->name ?: $user->email ?: 'User #'.$user->user_id),
+                        'avatar_preset' => $this->normalizeAvatarPreset($user->avatar_preset),
+                        'avatar_url' => $this->resolveAvatarUrl($user),
+                        'message' => $text,
+                        'created_at' => now()->toISOString(),
+                        'updated_at' => null,
+                    ]);
+
+                    $messages = Cache::get($key, []);
+                    if (! is_array($messages)) {
+                        $messages = [];
+                    }
+
+                    $messages[] = $entry;
+
+                    if (count($messages) > self::CHAT_MAX_MESSAGES) {
+                        $messages = array_slice($messages, -self::CHAT_MAX_MESSAGES);
+                    }
+
+                    Cache::put($key, $messages, now()->addSeconds(self::CHAT_TTL_SECONDS));
+
+                    return $entry;
+                }
+            );
+        } catch (LockTimeoutException) {
+            return response()->json([
+                'message' => 'Realtime chat is busy, please retry.',
+            ], 423);
         }
-
-        $messages[] = $entry;
-
-        if (count($messages) > self::CHAT_MAX_MESSAGES) {
-            $messages = array_slice($messages, -self::CHAT_MAX_MESSAGES);
-        }
-
-        Cache::put($key, $messages, now()->addSeconds(self::CHAT_TTL_SECONDS));
 
         $this->broadcastSafely(new ProjectRealtimeEvent(
             $project->project_id,
@@ -258,6 +284,184 @@ class ProjectRealtimeController extends Controller
             'status' => 'ok',
             'message' => $entry,
         ], 201);
+    }
+
+    public function chatUpdate(
+        Request $request,
+        int $projectId,
+        int $messageId,
+        ProjectAccessService $access
+    ): JsonResponse {
+        $user = $request->user();
+
+        if (! $user) {
+            return response()->json(['message' => 'Unauthorized.'], 401);
+        }
+
+        $project = Project::query()->findOrFail($projectId);
+        if (! $access->userHasAccess($project, $user)) {
+            return response()->json(['message' => 'Access denied.'], 403);
+        }
+
+        $data = $request->validate([
+            'message' => ['required', 'string', 'max:1000'],
+        ]);
+
+        $text = trim((string) $data['message']);
+        if ($text === '') {
+            return response()->json(['message' => 'Message cannot be empty.'], 422);
+        }
+
+        $key = $this->chatKey($project->project_id);
+
+        try {
+            [$entry, $errorCode] = $this->withRealtimeCacheLock(
+                $this->chatLockKey($project->project_id),
+                function () use ($key, $messageId, $text, $user): array {
+                    $messages = Cache::get($key, []);
+                    if (! is_array($messages)) {
+                        $messages = [];
+                    }
+
+                    $updatedEntry = null;
+                    $normalizedMessages = [];
+
+                    foreach ($messages as $message) {
+                        $item = $this->formatChatEntry(is_array($message) ? $message : []);
+                        if ((int) $item['id'] !== $messageId) {
+                            $normalizedMessages[] = $item;
+                            continue;
+                        }
+
+                        if ((int) $item['user_id'] !== (int) $user->user_id) {
+                            return [null, 'forbidden'];
+                        }
+
+                        $item['message'] = $text;
+                        $item['updated_at'] = now()->toISOString();
+                        $updatedEntry = $item;
+                        $normalizedMessages[] = $item;
+                    }
+
+                    if (! is_array($updatedEntry)) {
+                        return [null, 'not_found'];
+                    }
+
+                    Cache::put($key, $normalizedMessages, now()->addSeconds(self::CHAT_TTL_SECONDS));
+
+                    return [$updatedEntry, null];
+                }
+            );
+        } catch (LockTimeoutException) {
+            return response()->json([
+                'message' => 'Realtime chat is busy, please retry.',
+            ], 423);
+        }
+
+        if ($errorCode === 'forbidden') {
+            return response()->json(['message' => 'You can edit only your own messages.'], 403);
+        }
+
+        if ($errorCode === 'not_found' || ! is_array($entry)) {
+            return response()->json(['message' => 'Chat message not found.'], 404);
+        }
+
+        $this->broadcastSafely(new ProjectRealtimeEvent(
+            $project->project_id,
+            (int) $user->user_id,
+            'realtime.chat.updated',
+            [
+                'message' => $entry,
+            ]
+        ));
+
+        return response()->json([
+            'status' => 'ok',
+            'message' => $entry,
+        ]);
+    }
+
+    public function chatDestroy(
+        Request $request,
+        int $projectId,
+        int $messageId,
+        ProjectAccessService $access
+    ): JsonResponse {
+        $user = $request->user();
+
+        if (! $user) {
+            return response()->json(['message' => 'Unauthorized.'], 401);
+        }
+
+        $project = Project::query()->findOrFail($projectId);
+        if (! $access->userHasAccess($project, $user)) {
+            return response()->json(['message' => 'Access denied.'], 403);
+        }
+
+        $key = $this->chatKey($project->project_id);
+
+        try {
+            [$deletedMessageId, $errorCode] = $this->withRealtimeCacheLock(
+                $this->chatLockKey($project->project_id),
+                function () use ($key, $messageId, $user): array {
+                    $messages = Cache::get($key, []);
+                    if (! is_array($messages)) {
+                        $messages = [];
+                    }
+
+                    $deletedMessageId = 0;
+                    $normalizedMessages = [];
+
+                    foreach ($messages as $message) {
+                        $item = $this->formatChatEntry(is_array($message) ? $message : []);
+                        if ((int) $item['id'] !== $messageId) {
+                            $normalizedMessages[] = $item;
+                            continue;
+                        }
+
+                        if ((int) $item['user_id'] !== (int) $user->user_id) {
+                            return [0, 'forbidden'];
+                        }
+
+                        $deletedMessageId = (int) $item['id'];
+                    }
+
+                    if ($deletedMessageId <= 0) {
+                        return [0, 'not_found'];
+                    }
+
+                    Cache::put($key, $normalizedMessages, now()->addSeconds(self::CHAT_TTL_SECONDS));
+
+                    return [$deletedMessageId, null];
+                }
+            );
+        } catch (LockTimeoutException) {
+            return response()->json([
+                'message' => 'Realtime chat is busy, please retry.',
+            ], 423);
+        }
+
+        if ($errorCode === 'forbidden') {
+            return response()->json(['message' => 'You can delete only your own messages.'], 403);
+        }
+
+        if ($errorCode === 'not_found' || (int) $deletedMessageId <= 0) {
+            return response()->json(['message' => 'Chat message not found.'], 404);
+        }
+
+        $this->broadcastSafely(new ProjectRealtimeEvent(
+            $project->project_id,
+            (int) $user->user_id,
+            'realtime.chat.deleted',
+            [
+                'message_id' => (int) $deletedMessageId,
+            ]
+        ));
+
+        return response()->json([
+            'status' => 'ok',
+            'message_id' => (int) $deletedMessageId,
+        ]);
     }
 
     public function editorSync(
@@ -289,7 +493,7 @@ class ProjectRealtimeController extends Controller
         ]);
 
         $path = (string) $data['path'];
-        $clientId = trim((string) $data['client_id']);
+        $clientId = $this->normalizeEditorClientId($user, trim((string) $data['client_id']));
         $opId = trim((string) $data['op_id']);
         $baseRevision = (int) $data['base_revision'];
 
@@ -532,6 +736,7 @@ class ProjectRealtimeController extends Controller
         $userId = (int) ($entry['user_id'] ?? 0);
         $userName = trim((string) ($entry['user_name'] ?? ''));
         $avatarUrl = trim((string) ($entry['avatar_url'] ?? ''));
+        $updatedAt = trim((string) ($entry['updated_at'] ?? ''));
 
         return [
             'id' => max(0, (int) ($entry['id'] ?? 0)),
@@ -543,6 +748,7 @@ class ProjectRealtimeController extends Controller
             'avatar_url' => $avatarUrl !== '' ? $avatarUrl : null,
             'message' => (string) ($entry['message'] ?? ''),
             'created_at' => (string) ($entry['created_at'] ?? ''),
+            'updated_at' => $updatedAt !== '' ? $updatedAt : null,
         ];
     }
 
@@ -572,9 +778,19 @@ class ProjectRealtimeController extends Controller
         return 'project:'.$projectId.':realtime:presence';
     }
 
+    private function presenceLockKey(int $projectId): string
+    {
+        return 'project:'.$projectId.':realtime:presence:lock';
+    }
+
     private function chatKey(int $projectId): string
     {
         return 'project:'.$projectId.':realtime:chat';
+    }
+
+    private function chatLockKey(int $projectId): string
+    {
+        return 'project:'.$projectId.':realtime:chat:lock';
     }
 
     private function chatSeqKey(int $projectId): string
@@ -818,6 +1034,39 @@ class ProjectRealtimeController extends Controller
     private function editorDocLockKey(int $projectId, string $path): string
     {
         return 'project:'.$projectId.':realtime:editor:doc:lock:'.sha1($path);
+    }
+
+    /**
+     * @template TResult
+     *
+     * @param callable(): TResult $callback
+     * @return TResult
+     */
+    private function withRealtimeCacheLock(string $lockKey, callable $callback)
+    {
+        $store = Cache::getStore();
+        if (! $store instanceof LockProvider) {
+            return $callback();
+        }
+
+        return Cache::lock($lockKey, 3)->block(2, $callback);
+    }
+
+    private function normalizeEditorClientId(User $user, string $clientId): string
+    {
+        $normalized = strtolower(trim($clientId));
+        $normalized = preg_replace('/[^a-z0-9._:-]/', '-', $normalized) ?? '';
+        $normalized = trim($normalized, '-');
+
+        if ($normalized === '') {
+            $normalized = 'client';
+        }
+
+        if (strlen($normalized) > 96) {
+            $normalized = substr($normalized, 0, 96);
+        }
+
+        return 'u'.((int) $user->user_id).':'.$normalized;
     }
 
     private function truncateEditorInsert(string $value): string

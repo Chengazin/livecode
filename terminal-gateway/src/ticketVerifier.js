@@ -82,6 +82,10 @@ function validatePayload(payload, nowSeconds) {
     throw new Error("Ticket project root is invalid.");
   }
 
+  if (!payload.owner_root || typeof payload.owner_root !== "string") {
+    throw new Error("Ticket owner root is invalid.");
+  }
+
   if (!payload.cwd || typeof payload.cwd !== "string") {
     throw new Error("Ticket cwd is invalid.");
   }
@@ -90,6 +94,7 @@ function validatePayload(payload, nowSeconds) {
     iss: String(payload.iss || ""),
     terminal_session_id: terminalSessionId,
     project_id: projectId,
+    owner_root: String(payload.owner_root),
     project_root: String(payload.project_root),
     cwd: String(payload.cwd),
     cwd_relative: String(payload.cwd_relative || "/"),

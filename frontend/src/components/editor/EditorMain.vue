@@ -12,6 +12,8 @@
     :terminal-dock-open="terminalDockOpen"
     :terminal-dock-style="terminalDockStyle"
     :selected-project-id="selectedProjectId"
+    :active-project-path="activeProjectPath"
+    :before-run-active-file="beforeRunActiveFile"
     @open-terminal-dock="emit('open-terminal-dock')"
     @start-terminal-dock-pull="emit('start-terminal-dock-pull', $event)"
     @start-terminal-dock-resize="emit('start-terminal-dock-resize', $event)"
@@ -64,6 +66,14 @@ defineProps({
   selectedProjectId: {
     type: [String, Number],
     default: "",
+  },
+  activeProjectPath: {
+    type: String,
+    default: "",
+  },
+  beforeRunActiveFile: {
+    type: Function,
+    default: null,
   },
   showSidebar: {
     type: Boolean,

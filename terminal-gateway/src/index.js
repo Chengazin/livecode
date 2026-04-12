@@ -94,6 +94,8 @@ const callbackUrl = envString("TERMINAL_BACKEND_CALLBACK_URL", "");
 const callbackSecret = envString("TERMINAL_BACKEND_CALLBACK_SECRET", "");
 const callbackHeader = envString("TERMINAL_BACKEND_CALLBACK_HEADER", "X-Terminal-Gateway-Secret");
 const callbackTimeoutMs = envNumber("TERMINAL_BACKEND_CALLBACK_TIMEOUT_MS", 5000);
+const runner = envString("TERMINAL_GATEWAY_RUNNER", "docker");
+const allowUnsafeHostRunner = envBoolean("TERMINAL_GATEWAY_ALLOW_UNSAFE_HOST_RUNNER", false);
 
 const backendReporter = createBackendReporter({
   urlTemplate: callbackUrl,
@@ -107,6 +109,13 @@ if (!sharedSecret) {
   process.exit(1);
 }
 
+if (runner.trim().toLowerCase() === "host" && !allowUnsafeHostRunner) {
+  console.error(
+    "[terminal-gateway] host runner is disabled by default for security. Use TERMINAL_GATEWAY_RUNNER=docker or explicitly set TERMINAL_GATEWAY_ALLOW_UNSAFE_HOST_RUNNER=true in trusted single-tenant environments."
+  );
+  process.exit(1);
+}
+
 const manager = new PtyManager({
   idleTimeoutMs: envNumber("TERMINAL_GATEWAY_IDLE_TIMEOUT_SECONDS", 900) * 1000,
   hardTimeoutMs: envNumber("TERMINAL_GATEWAY_HARD_TIMEOUT_SECONDS", 8 * 3600) * 1000,
@@ -116,7 +125,8 @@ const manager = new PtyManager({
   maxSocketBufferBytes: envNumber("TERMINAL_GATEWAY_MAX_SOCKET_BUFFER_BYTES", 1024 * 1024),
   defaultCols: envNumber("TERMINAL_GATEWAY_DEFAULT_COLS", 100),
   defaultRows: envNumber("TERMINAL_GATEWAY_DEFAULT_ROWS", 30),
-  runner: envString("TERMINAL_GATEWAY_RUNNER", "docker"),
+  runner,
+  allowUnsafeHostRunner,
   dockerBinary: envString("TERMINAL_DOCKER_BINARY", "docker"),
   dockerImage: envString("TERMINAL_DOCKER_IMAGE", "alpine:3.20"),
   dockerShell: envString("TERMINAL_DOCKER_SHELL", "/bin/sh"),
@@ -125,6 +135,11 @@ const manager = new PtyManager({
   dockerCpus: envString("TERMINAL_DOCKER_CPU_LIMIT", ""),
   dockerMemory: envString("TERMINAL_DOCKER_MEMORY_LIMIT", ""),
   dockerPidsLimit: envString("TERMINAL_DOCKER_PIDS_LIMIT", ""),
+  dockerUser: envString("TERMINAL_DOCKER_USER", ""),
+  dockerCapDropAll: envBoolean("TERMINAL_DOCKER_CAP_DROP_ALL", true),
+  dockerNoNewPrivileges: envBoolean("TERMINAL_DOCKER_NO_NEW_PRIVILEGES", true),
+  dockerTmpfsMounts: parseCsv(process.env.TERMINAL_DOCKER_TMPFS_MOUNTS || "/tmp"),
+  dockerHome: envString("TERMINAL_DOCKER_HOME", ""),
   dockerReadOnly: envBoolean("TERMINAL_DOCKER_READ_ONLY", true),
   dockerExtraArgs: parseCsv(process.env.TERMINAL_DOCKER_EXTRA_ARGS || ""),
   onSessionClosed: backendReporter.reportSessionClosed,
@@ -266,7 +281,7 @@ process.on("SIGTERM", () => shutdown("SIGTERM"));
 server.listen(port, host, () => {
   console.log(`[terminal-gateway] listening on ws://${host}:${port}${wsPath}`);
   console.log(`[terminal-gateway] allowed origins: ${allowedOrigins.join(", ")}`);
-  console.log(`[terminal-gateway] runner: ${envString("TERMINAL_GATEWAY_RUNNER", "docker")}`);
+  console.log(`[terminal-gateway] runner: ${runner}`);
   console.log(
     `[terminal-gateway] backend callback: ${
       backendReporter.enabled ? "enabled" : "disabled"

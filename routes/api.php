@@ -1,5 +1,4 @@
 <?php
-
 use App\Http\Controllers\AdminController;
 use App\Http\Controllers\AdminProjectController;
 use App\Http\Controllers\AdminProjectInvitationController;
@@ -14,6 +13,7 @@ use App\Http\Controllers\ProjectInfoController;
 use App\Http\Controllers\ProjectInvitationController;
 use App\Http\Controllers\ProjectParticipantController;
 use App\Http\Controllers\ProjectRealtimeController;
+use App\Http\Controllers\ProjectSpeechController;
 use App\Http\Controllers\ProjectTerminalController;
 use App\Http\Controllers\ProjectFilesystemController;
 use App\Http\Controllers\ProjectCodeCommentController;
@@ -26,17 +26,13 @@ Route::post('/auth/login', [AuthController::class, 'login'])->middleware('thrott
 Route::post('/forgejo/oauth/start', [ForgejoAuthController::class, 'start'])->middleware('throttle:oauth-start');
 Route::get('/forgejo/oauth/callback', [ForgejoAuthController::class, 'callback']);
 Route::post('/terminal/gateway/sessions/{terminalSessionId}/close', [ProjectTerminalController::class, 'gatewayClose']);
-
 Route::middleware('auth:sanctum')->get('/me', [ProfileController::class, 'show']);
-
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     Route::post('/auth/logout-all', [AuthController::class, 'logoutAll']);
     Route::patch('/me/profile', [ProfileController::class, 'update']);
     Route::post('/me/avatar', [ProfileController::class, 'uploadAvatar']);
     Route::delete('/me/avatar', [ProfileController::class, 'deleteAvatar']);
-
-    // Создание проекта: POST /api/projects
     Route::apiResource('projects', ProjectController::class);
     Route::get('projects/{projectId}/info', [ProjectInfoController::class, 'show']);
     Route::post('projects/{projectId}/git/branch', [ProjectGitController::class, 'createBranch']);
@@ -57,6 +53,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('projects/{projectId}/realtime/presence', [ProjectRealtimeController::class, 'presence']);
     Route::get('projects/{projectId}/realtime/chat', [ProjectRealtimeController::class, 'chatIndex']);
     Route::post('projects/{projectId}/realtime/chat', [ProjectRealtimeController::class, 'chatStore']);
+    Route::patch('projects/{projectId}/realtime/chat/{messageId}', [ProjectRealtimeController::class, 'chatUpdate']);
+    Route::delete('projects/{projectId}/realtime/chat/{messageId}', [ProjectRealtimeController::class, 'chatDestroy']);
+    Route::post('projects/{projectId}/speech/transcribe', [ProjectSpeechController::class, 'transcribe']);
     Route::post('projects/{projectId}/realtime/editor-state', [ProjectRealtimeController::class, 'editorState']);
     Route::post('projects/{projectId}/realtime/editor-sync', [ProjectRealtimeController::class, 'editorSync']);
     Route::get('projects/{projectId}/code-comments', [ProjectCodeCommentController::class, 'index']);
@@ -70,7 +69,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('project-participants', ProjectParticipantController::class);
     Route::apiResource('project-invitations', ProjectInvitationController::class);
 });
-
 Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::apiResource('users', UserController::class);
     Route::apiResource('admins', AdminController::class);

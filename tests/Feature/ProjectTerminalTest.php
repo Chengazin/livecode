@@ -68,6 +68,23 @@ class ProjectTerminalTest extends TestCase
         $ticketValue = (string) $ticket->json('ticket');
         $this->assertNotSame('', $ticketValue);
         $this->assertStringContainsString('.', $ticketValue);
+
+        $payload = $this->decodeTicketPayload($ticketValue);
+        $ownerRoot = $this->normalizePath((string) ($payload['owner_root'] ?? ''));
+        $projectRoot = $this->normalizePath((string) ($payload['project_root'] ?? ''));
+        $cwdAbsolute = $this->normalizePath((string) ($payload['cwd'] ?? ''));
+
+        $this->assertNotSame('', $ownerRoot);
+        $this->assertNotSame('', $projectRoot);
+        $this->assertNotSame('', $cwdAbsolute);
+        $this->assertTrue(
+            $projectRoot === $ownerRoot || str_starts_with($projectRoot, rtrim($ownerRoot, '/').'/'),
+            'project_root must stay inside owner_root'
+        );
+        $this->assertTrue(
+            $cwdAbsolute === $projectRoot || str_starts_with($cwdAbsolute, rtrim($projectRoot, '/').'/'),
+            'cwd must stay inside project_root'
+        );
     }
 
     public function test_private_terminal_session_is_hidden_and_inaccessible_to_other_collaborator(): void
@@ -389,6 +406,139 @@ class ProjectTerminalTest extends TestCase
         ]);
     }
 
+    public function test_terminal_rejects_malicious_cwd_payloads(): void
+    {
+        $owner = $this->createUser('terminal-owner-security-cwd@example.com');
+        $collaborator = $this->createUser('terminal-collab-security-cwd@example.com');
+        $project = $this->createProject($owner, 'Terminal security cwd');
+        $this->addParticipant($project, $collaborator);
+
+        Storage::disk('local')->makeDirectory($project->project_path.'/src');
+        $token = $collaborator->createToken('test')->plainTextToken;
+
+        $payloads = [
+            '/../',
+            '/..',
+            '/../../other-project',
+            '/src/../secrets',
+            '/src//secrets',
+            '/src/$HOME',
+            '/src/`whoami`',
+            '/src/|cat',
+        ];
+
+        foreach ($payloads as $cwd) {
+            $response = $this->withToken($token)->postJson('/api/projects/'.$project->project_id.'/terminal/sessions', [
+                'name' => 'Attack cwd: '.$cwd,
+                'cwd' => $cwd,
+            ]);
+
+            $response->assertStatus(422)->assertJson(['message' => 'Invalid terminal directory.']);
+        }
+    }
+
+    public function test_terminal_rejects_shell_injection_payloads(): void
+    {
+        $owner = $this->createUser('terminal-owner-security-shell@example.com');
+        $collaborator = $this->createUser('terminal-collab-security-shell@example.com');
+        $project = $this->createProject($owner, 'Terminal security shell');
+        $this->addParticipant($project, $collaborator);
+
+        $token = $collaborator->createToken('test')->plainTextToken;
+
+        $payloads = [
+            '/bin/sh -c "cat /etc/passwd"',
+            'powershell.exe -Command "Get-ChildItem C:\\"',
+            'cmd.exe /c dir C:\\',
+            'bash; cat /etc/shadow',
+            'python3',
+            'node',
+        ];
+
+        foreach ($payloads as $shell) {
+            $response = $this->withToken($token)->postJson('/api/projects/'.$project->project_id.'/terminal/sessions', [
+                'name' => 'Attack shell',
+                'shell' => $shell,
+            ]);
+
+            $response->assertStatus(422)->assertJson(['message' => 'Unsupported shell.']);
+        }
+    }
+
+    public function test_terminal_ticket_endpoint_prevents_cross_project_session_id_enumeration(): void
+    {
+        $ownerA = $this->createUser('terminal-owner-security-enum-a@example.com');
+        $ownerB = $this->createUser('terminal-owner-security-enum-b@example.com');
+        $collaborator = $this->createUser('terminal-collab-security-enum@example.com');
+        $projectA = $this->createProject($ownerA, 'Terminal enum source');
+        $projectB = $this->createProject($ownerB, 'Terminal enum target');
+
+        $this->addParticipant($projectA, $collaborator);
+
+        $ownerToken = $ownerB->createToken('test')->plainTextToken;
+        $collaboratorToken = $collaborator->createToken('test')->plainTextToken;
+
+        $create = $this->withToken($ownerToken)->postJson('/api/projects/'.$projectB->project_id.'/terminal/sessions', [
+            'name' => 'B private session',
+            'shared' => false,
+        ])->assertStatus(201);
+
+        $sessionIdFromOtherProject = (int) $create->json('session.terminal_session_id');
+
+        $crossProjectRoute = $this->withToken($collaboratorToken)->postJson(
+            '/api/projects/'.$projectA->project_id.'/terminal/sessions/'.$sessionIdFromOtherProject.'/ticket'
+        );
+        $this->assertContains(
+            $crossProjectRoute->getStatusCode(),
+            [403, 404],
+            'Cross-project session probing must not return a ticket.'
+        );
+
+        $this->assertArrayNotHasKey('ticket', (array) $crossProjectRoute->json());
+    }
+
+    public function test_terminal_ticket_payload_does_not_leak_other_project_paths(): void
+    {
+        $ownerA = $this->createUser('terminal-owner-security-a@example.com');
+        $ownerB = $this->createUser('terminal-owner-security-b@example.com');
+        $collaboratorA = $this->createUser('terminal-collab-security-a@example.com');
+
+        $projectA = $this->createProject($ownerA, 'Terminal payload A');
+        $projectB = $this->createProject($ownerB, 'Terminal payload B');
+        $this->addParticipant($projectA, $collaboratorA);
+
+        $token = $collaboratorA->createToken('test')->plainTextToken;
+
+        $create = $this->withToken($token)->postJson('/api/projects/'.$projectA->project_id.'/terminal/sessions', [
+            'name' => 'A private session',
+            'cwd' => '/',
+        ])->assertStatus(201);
+
+        $sessionId = (int) $create->json('session.terminal_session_id');
+
+        $ticket = $this->withToken($token)->postJson(
+            '/api/projects/'.$projectA->project_id.'/terminal/sessions/'.$sessionId.'/ticket'
+        )->assertOk();
+
+        $payload = $this->decodeTicketPayload((string) $ticket->json('ticket'));
+        $projectRootFromTicket = $this->normalizePath((string) ($payload['project_root'] ?? ''));
+        $ownerRootFromTicket = $this->normalizePath((string) ($payload['owner_root'] ?? ''));
+
+        $disk = Storage::disk('local');
+        $projectBRoot = $this->normalizePath($disk->path($projectB->project_path));
+
+        $this->assertNotSame($projectBRoot, $projectRootFromTicket);
+        $this->assertNotSame($projectBRoot, $ownerRootFromTicket);
+        $this->assertFalse(
+            str_starts_with($projectRootFromTicket, rtrim($projectBRoot, '/').'/'),
+            'project_root in ticket should not point into another project owner root'
+        );
+        $this->assertFalse(
+            str_starts_with($ownerRootFromTicket, rtrim($projectBRoot, '/').'/'),
+            'owner_root in ticket should not point into another project owner root'
+        );
+    }
+
     private function createUser(string $email): User
     {
         return User::query()->create([
@@ -422,5 +572,34 @@ class ProjectTerminalTest extends TestCase
             'user_id' => $user->user_id,
             'joined_at' => now(),
         ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function decodeTicketPayload(string $ticket): array
+    {
+        $parts = explode('.', $ticket, 2);
+        $this->assertCount(2, $parts);
+
+        $normalized = strtr((string) $parts[0], '-_', '+/');
+        $remainder = strlen($normalized) % 4;
+        if ($remainder !== 0) {
+            $normalized .= str_repeat('=', 4 - $remainder);
+        }
+
+        $payloadJson = base64_decode($normalized, true);
+        $this->assertIsString($payloadJson);
+
+        $payload = json_decode($payloadJson, true);
+        $this->assertIsArray($payload);
+
+        return $payload;
+    }
+
+    private function normalizePath(string $value): string
+    {
+        $path = str_replace('\\', '/', trim($value));
+        return rtrim($path, '/');
     }
 }

@@ -7,10 +7,17 @@
         'editor-layout--main-only': !showSidebar,
         'editor-layout--with-sidebar': showSidebar,
         'editor-layout--with-chat': canUseProjectFs && canResizeChatPane,
+        'editor-layout--sidebar-collapsed': showSidebar && !sidebarContentVisible,
+        'editor-layout--chat-collapsed': canUseProjectFs && canResizeChatPane && !chatContentVisible,
       }"
       :style="editorLayoutStyle"
     >
-      <aside v-if="showSidebar" ref="editorSidebarPane" class="card editor-sidebar">
+      <aside
+        v-if="showSidebar"
+        ref="editorSidebarPane"
+        class="card editor-sidebar"
+        :class="{ 'editor-sidebar--collapsed': !sidebarContentVisible }"
+      >
         <EditorSidebar
           :t="t"
           :workspace-title="workspaceTitle"
@@ -63,6 +70,7 @@
           :forgejo-repo-html-url="projectMeta?.forgejo_repo_html_url || ''"
           :can-create-pull-request="canCreatePullRequest"
           :selected-project-id="selectedProjectId"
+          @sidebar-content-visibility-change="handleSidebarContentVisibilityChange"
           @go-to-projects="goToProjects"
           @open-project-settings-modal="handleOpenProjectSettingsModal"
           @update:editorLanguage="updateEditorLanguage"
@@ -109,12 +117,17 @@
       </aside>
 
       <button
-        v-if="canResizeSidebarPane"
+        v-if="canResizeSidebarPane && sidebarContentVisible"
         class="editor-splitter editor-splitter--sidebar"
         :class="{ 'is-active': activeResizePane === 'sidebar' }"
         type="button"
         aria-label="Resize sidebar"
         @pointerdown="startPaneResize('sidebar', $event)"
+      />
+      <div
+        v-else-if="showSidebar"
+        class="editor-splitter editor-splitter--sidebar editor-splitter--placeholder"
+        aria-hidden="true"
       />
 
       <div class="editor-main-stack">
@@ -127,6 +140,8 @@
             :terminal-dock-open="terminalDockOpen"
             :terminal-dock-style="terminalDockStyle"
             :selected-project-id="selectedProjectId"
+            :active-project-path="activeProjectPath"
+            :before-run-active-file="saveActiveProjectFileForRun"
             :show-sidebar="showSidebar"
             :editor-language="editorLanguage"
             :language-options="languageOptions"
@@ -220,11 +235,25 @@
                   <form class="ace-line-comment-form" @submit.prevent="submitAceLineComment">
                     <div class="ace-line-comment-form-row">
                       <input
+                        ref="aceLineCommentInputRef"
                         v-model.trim="aceLineCommentDraft"
                         type="text"
                         maxlength="3000"
                         :placeholder="t('editor.commentPlaceholder')"
                       />
+                      <button
+                        class="btn btn-sm btn-ghost voice-icon-btn"
+                        :class="{ 'is-listening': aceLineCommentVoiceListening }"
+                        type="button"
+                        :title="aceLineCommentVoiceListening ? t('editor.chatVoiceStop') : t('editor.chatVoiceStart')"
+                        :aria-label="aceLineCommentVoiceListening ? t('editor.chatVoiceStop') : t('editor.chatVoiceStart')"
+                        :disabled="aceLineCommentSubmitting"
+                        @click="toggleAceLineCommentVoiceInput"
+                      >
+                        <svg viewBox="0 0 24 24" class="voice-icon" aria-hidden="true">
+                          <path d="M12 14a3 3 0 0 0 3-3V7a3 3 0 0 0-6 0v4a3 3 0 0 0 3 3zm5-3a1 1 0 1 1 2 0 7 7 0 0 1-6 6.93V21h2a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2h2v-3.07A7 7 0 0 1 5 11a1 1 0 1 1 2 0 5 5 0 1 0 10 0z" />
+                        </svg>
+                      </button>
                       <button
                         class="btn btn-sm"
                         type="submit"
@@ -242,123 +271,200 @@
       </div>
 
       <button
-        v-if="canUseProjectFs && canResizeChatPane"
+        v-if="canUseProjectFs && canResizeChatPane && chatContentVisible"
         class="editor-splitter editor-splitter--chat"
         :class="{ 'is-active': activeResizePane === 'chat' }"
         type="button"
         aria-label="Resize chat panel"
         @pointerdown="startPaneResize('chat', $event)"
       />
+      <div
+        v-else-if="canUseProjectFs && canResizeChatPane"
+        class="editor-splitter editor-splitter--chat editor-splitter--placeholder"
+        aria-hidden="true"
+      />
 
-      <section v-if="canUseProjectFs" ref="editorChatPane" class="card editor-chat-column">
+      <section
+        v-if="canUseProjectFs"
+        ref="editorChatPane"
+        class="card editor-chat-column"
+        :class="{ 'editor-chat-column--collapsed': !chatContentVisible }"
+      >
         <div class="editor-chat-head">
-          <h2>{{ t("editor.liveSession") }}</h2>
-          <label class="realtime-toggle">
-            <input v-model="liveSyncEnabled" type="checkbox" />
-            <span>{{ t("editor.liveSyncEnabled") }}</span>
-          </label>
-        </div>
-
-        <p class="muted-text">{{ t("editor.liveSyncHint") }}</p>
-
-        <div class="realtime-presence">
-          <h3>{{ t("editor.onlineCollaborators") }}</h3>
-          <p v-if="realtimePeers.length === 0" class="muted-text">{{ t("editor.onlyYouOnline") }}</p>
-          <div v-else class="presence-list">
-            <div v-for="peer in realtimePeers" :key="peer.user_id" class="presence-row">
-              <div class="presence-row-head">
-                <img
-                  v-if="resolvePresenceAvatarUrl(peer)"
-                  :src="resolvePresenceAvatarUrl(peer)"
-                  :alt="t('profile.avatarAlt')"
-                  class="mini-avatar-image"
-                />
-                <span
-                  v-else
-                  class="mini-avatar-fallback"
-                  :style="{ background: resolvePresenceAvatarStyle(peer).background }"
-                >
-                  {{ resolvePresenceAvatarStyle(peer).symbol }}
-                </span>
-                <strong>{{ peer.name }}</strong>
-              </div>
-              <small v-if="peer.path">
-                {{ peer.path }}<span v-if="peer.cursor_row !== null"> @ {{ peer.cursor_row + 1 }}:{{ (peer.cursor_column ?? 0) + 1 }}</span>
-              </small>
-              <small v-else>{{ t("editor.presenceNoFile") }}</small>
-            </div>
-          </div>
-        </div>
-
-        <div class="chat-log">
-          <p v-if="chatMessages.length === 0" class="muted-text">{{ t("editor.chatEmpty") }}</p>
-          <div
-            v-for="message in chatMessages"
-            :key="message.id"
-            class="chat-row"
-            :class="{ self: message.user_id === currentUserId }"
-          >
-            <template v-if="message.user_id === currentUserId">
-              <div class="chat-copy">
-                <strong>{{ message.user_name || `#${message.user_id}` }}</strong>
-                <small>{{ message.message }}</small>
-              </div>
-              <img
-                v-if="resolveMessageAvatarUrl(message)"
-                :src="resolveMessageAvatarUrl(message)"
-                :alt="t('profile.avatarAlt')"
-                class="mini-avatar-image chat-avatar"
-              />
-              <span
-                v-else
-                class="mini-avatar-fallback chat-avatar"
-                :style="{ background: resolveMessageAvatarStyle(message).background }"
-              >
-                {{ resolveMessageAvatarStyle(message).symbol }}
-              </span>
-            </template>
-            <template v-else>
-              <img
-                v-if="resolveMessageAvatarUrl(message)"
-                :src="resolveMessageAvatarUrl(message)"
-                :alt="t('profile.avatarAlt')"
-                class="mini-avatar-image chat-avatar"
-              />
-              <span
-                v-else
-                class="mini-avatar-fallback chat-avatar"
-                :style="{ background: resolveMessageAvatarStyle(message).background }"
-              >
-                {{ resolveMessageAvatarStyle(message).symbol }}
-              </span>
-              <div class="chat-copy">
-                <strong>{{ message.user_name || `#${message.user_id}` }}</strong>
-                <small>{{ message.message }}</small>
-              </div>
-            </template>
-          </div>
-        </div>
-
-        <form class="chat-form" @submit.prevent="sendChatMessage">
-          <div class="chat-input-shell">
-            <input
-              v-model.trim="chatDraft"
-              type="text"
-              maxlength="1000"
-              :placeholder="t('editor.chatPlaceholder')"
-            />
+          <h2 v-if="chatContentVisible">{{ t("editor.liveSession") }}</h2>
+          <div class="editor-chat-head-actions">
+            <label v-if="chatContentVisible" class="realtime-toggle">
+              <input v-model="liveSyncEnabled" type="checkbox" />
+              <span>{{ t("editor.liveSyncEnabled") }}</span>
+            </label>
             <button
-              class="btn btn-sm chat-send-btn"
-              type="submit"
-              :title="t('editor.chatSend')"
-              :aria-label="t('editor.chatSend')"
-              :disabled="chatSending || !chatDraft"
+              class="icon-btn editor-chat-toggle-btn"
+              type="button"
+              :title="chatContentVisible ? t('editor.chatPanelCollapse') : t('editor.chatPanelExpand')"
+              :aria-label="chatContentVisible ? t('editor.chatPanelCollapse') : t('editor.chatPanelExpand')"
+              @click="toggleChatContentVisibility"
             >
-              {{ chatSending ? t("common.saving") : t("editor.chatSend") }}
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path v-if="chatContentVisible" d="M9 6l6 6-6 6" />
+                <path v-else d="M15 6l-6 6 6 6" />
+              </svg>
             </button>
           </div>
-        </form>
+        </div>
 
+        <div v-if="chatContentVisible" class="editor-chat-content">
+            <p class="muted-text">{{ t("editor.liveSyncHint") }}</p>
+
+            <div class="realtime-presence">
+              <h3>{{ t("editor.onlineCollaborators") }}</h3>
+              <p v-if="realtimePeers.length === 0" class="muted-text">{{ t("editor.onlyYouOnline") }}</p>
+              <div v-else class="presence-list">
+                <div v-for="peer in realtimePeers" :key="peer.user_id" class="presence-row">
+                  <div class="presence-row-head">
+                    <img
+                      v-if="resolvePresenceAvatarUrl(peer)"
+                      :src="resolvePresenceAvatarUrl(peer)"
+                      :alt="t('profile.avatarAlt')"
+                      class="mini-avatar-image"
+                    />
+                    <span
+                      v-else
+                      class="mini-avatar-fallback"
+                      :style="{ background: resolvePresenceAvatarStyle(peer).background }"
+                    >
+                      {{ resolvePresenceAvatarStyle(peer).symbol }}
+                    </span>
+                    <strong>{{ peer.name }}</strong>
+                  </div>
+                  <small v-if="peer.path">
+                    {{ peer.path }}<span v-if="peer.cursor_row !== null"> @ {{ peer.cursor_row + 1 }}:{{ (peer.cursor_column ?? 0) + 1 }}</span>
+                  </small>
+                  <small v-else>{{ t("editor.presenceNoFile") }}</small>
+                </div>
+              </div>
+            </div>
+
+            <div class="chat-log">
+              <p v-if="chatMessages.length === 0" class="muted-text">{{ t("editor.chatEmpty") }}</p>
+              <div
+                v-for="message in chatMessages"
+                :key="message.id"
+                class="chat-row"
+                :class="{ self: message.user_id === currentUserId, editing: message.id === chatEditingMessageId }"
+              >
+                <template v-if="message.user_id === currentUserId">
+                  <div class="chat-copy">
+                    <div class="chat-copy-head">
+                      <strong>{{ message.user_name || `#${message.user_id}` }}</strong>
+                      <div class="chat-message-tools">
+                        <button
+                          class="chat-icon-btn"
+                          type="button"
+                          :title="t('editor.chatEdit')"
+                          :aria-label="t('editor.chatEdit')"
+                          :disabled="chatSending || chatDeletingMessageId === message.id"
+                          @click="startChatMessageEdit(message)"
+                        >
+                          <svg viewBox="0 0 24 24" class="chat-action-icon" aria-hidden="true">
+                            <path d="M3 17.25V21h3.75l11-11-3.75-3.75-11 11zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83L18.88 8.88l1.83-1.84z" />
+                          </svg>
+                        </button>
+                        <button
+                          class="chat-icon-btn is-danger"
+                          type="button"
+                          :title="t('editor.chatDelete')"
+                          :aria-label="t('editor.chatDelete')"
+                          :disabled="chatSending || chatDeletingMessageId === message.id"
+                          @click="deleteChatMessage(message)"
+                        >
+                          <svg viewBox="0 0 24 24" class="chat-action-icon" aria-hidden="true">
+                            <path d="M9 3a1 1 0 0 0-1 1v1H5a1 1 0 1 0 0 2h.77l1.02 12.2A2 2 0 0 0 8.78 21h6.44a2 2 0 0 0 1.99-1.8L18.23 7H19a1 1 0 1 0 0-2h-3V4a1 1 0 0 0-1-1H9zm1 2V5h4V5h-4zm-1.2 2h6.4l-.98 11.72a.5.5 0 0 1-.5.45H10.28a.5.5 0 0 1-.5-.45L8.8 7zm2.2 2a1 1 0 0 1 1 1v6a1 1 0 1 1-2 0v-6a1 1 0 0 1 1-1zm4 0a1 1 0 0 1 1 1v6a1 1 0 1 1-2 0v-6a1 1 0 0 1 1-1z" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                    <small>{{ message.message }}</small>
+                    <small v-if="message.updated_at" class="chat-copy-meta">{{ t("editor.chatEdited") }}</small>
+                  </div>
+                  <img
+                    v-if="resolveMessageAvatarUrl(message)"
+                    :src="resolveMessageAvatarUrl(message)"
+                    :alt="t('profile.avatarAlt')"
+                    class="mini-avatar-image chat-avatar"
+                  />
+                  <span
+                    v-else
+                    class="mini-avatar-fallback chat-avatar"
+                    :style="{ background: resolveMessageAvatarStyle(message).background }"
+                  >
+                    {{ resolveMessageAvatarStyle(message).symbol }}
+                  </span>
+                </template>
+                <template v-else>
+                  <img
+                    v-if="resolveMessageAvatarUrl(message)"
+                    :src="resolveMessageAvatarUrl(message)"
+                    :alt="t('profile.avatarAlt')"
+                    class="mini-avatar-image chat-avatar"
+                  />
+                  <span
+                    v-else
+                    class="mini-avatar-fallback chat-avatar"
+                    :style="{ background: resolveMessageAvatarStyle(message).background }"
+                  >
+                    {{ resolveMessageAvatarStyle(message).symbol }}
+                  </span>
+                  <div class="chat-copy">
+                    <strong>{{ message.user_name || `#${message.user_id}` }}</strong>
+                    <small>{{ message.message }}</small>
+                    <small v-if="message.updated_at" class="chat-copy-meta">{{ t("editor.chatEdited") }}</small>
+                  </div>
+                </template>
+              </div>
+            </div>
+
+            <form class="chat-form" @submit.prevent="sendChatMessage">
+              <div class="chat-input-shell">
+                <input
+                  ref="chatInputRef"
+                  v-model="chatDraft"
+                  type="text"
+                  maxlength="1000"
+                  :placeholder="t('editor.chatPlaceholder')"
+                />
+                <button
+                  class="btn btn-sm btn-ghost voice-icon-btn"
+                  :class="{ 'is-listening': chatVoiceListening }"
+                  type="button"
+                  :title="chatVoiceListening ? t('editor.chatVoiceStop') : t('editor.chatVoiceStart')"
+                  :aria-label="chatVoiceListening ? t('editor.chatVoiceStop') : t('editor.chatVoiceStart')"
+                  @click="toggleChatVoiceInput"
+                >
+                  <svg viewBox="0 0 24 24" class="voice-icon" aria-hidden="true">
+                    <path d="M12 14a3 3 0 0 0 3-3V7a3 3 0 0 0-6 0v4a3 3 0 0 0 3 3zm5-3a1 1 0 1 1 2 0 7 7 0 0 1-6 6.93V21h2a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2h2v-3.07A7 7 0 0 1 5 11a1 1 0 1 1 2 0 5 5 0 1 0 10 0z" />
+                  </svg>
+                </button>
+                <button
+                  class="btn btn-sm chat-send-btn"
+                  type="submit"
+                  :title="chatEditingMessageId > 0 ? t('editor.chatSave') : t('editor.chatSend')"
+                  :aria-label="chatEditingMessageId > 0 ? t('editor.chatSave') : t('editor.chatSend')"
+                  :disabled="chatSending || !chatDraftTrimmed"
+                >
+                  {{ chatSending ? t("common.saving") : (chatEditingMessageId > 0 ? t("editor.chatSave") : t("editor.chatSend")) }}
+                </button>
+                <button
+                  v-if="chatEditingMessageId > 0"
+                  class="btn btn-sm btn-ghost"
+                  type="button"
+                  :disabled="chatSending"
+                  @click="cancelChatMessageEdit"
+                >
+                  {{ t("editor.chatCancelEdit") }}
+                </button>
+              </div>
+            </form>
+        </div>
       </section>
     </div>
 
@@ -423,7 +529,7 @@ import {
 
 const route = useRoute();
 const router = useRouter();
-const { t } = useI18n();
+const { t, locale } = useI18n();
 
 const GUEST_KEY = "livecode.editor.guest";
 
@@ -431,6 +537,8 @@ const session = ref(getSession());
 const isAuthenticated = computed(() => Boolean(session.value.accessToken));
 const isProjectRoute = computed(() => Boolean(route.params.projectId));
 const showSidebar = computed(() => isAuthenticated.value && isProjectRoute.value);
+const sidebarContentVisible = ref(true);
+const chatContentVisible = ref(true);
 
 const guest = reactive({
   path: "scratch/main.js",
@@ -455,16 +563,23 @@ const lastKnownFileUpdatedAt = ref("");
 const liveSyncEnabled = ref(true);
 const realtimePeers = ref([]);
 const chatMessages = ref([]);
+const chatInputRef = ref(null);
 const chatDraft = ref("");
 const chatSending = ref(false);
+const chatEditingMessageId = ref(0);
+const chatDeletingMessageId = ref(0);
+const chatVoiceSupported = ref(false);
+const chatVoiceListening = ref(false);
 const codeComments = ref([]);
 const codeCommentsLoading = ref(false);
 const codeCommentDeletingId = ref(0);
 const aceCommentOverlayHost = ref(null);
 const aceLineCommentTriggerRef = ref(null);
 const aceLineCommentPopoverRef = ref(null);
+const aceLineCommentInputRef = ref(null);
 const aceLineCommentDraft = ref("");
 const aceLineCommentSubmitting = ref(false);
+const aceLineCommentVoiceListening = ref(false);
 const aceLineCommentTrigger = reactive({
   visible: false,
   row: 0,
@@ -483,6 +598,7 @@ const aceLineCommentPopover = reactive({
 });
 const projectSettingsSelectedCode = ref("");
 const currentUserId = computed(() => Number(session.value?.user?.user_id || 0));
+const chatDraftTrimmed = computed(() => String(chatDraft.value || "").trim());
 const realtimeClientId = ref(getOrCreateRealtimeClientId());
 const editorSyncRevision = ref(0);
 const editorSyncBusy = ref(false);
@@ -508,6 +624,7 @@ let activeRealtimeProjectId = "";
 let realtimeChannel = null;
 let realtimeChannelSubscribed = false;
 let realtimeSubscribeWatchTimerId = null;
+let realtimeSubscribeAttempts = 0;
 let presenceIntervalTimerId = null;
 let presenceDebounceTimerId = null;
 let presencePruneTimerId = null;
@@ -517,6 +634,12 @@ let editorSyncRetryTimerId = null;
 let editorSyncPendingOps = [];
 let editorSyncInflightOp = null;
 let editorDeferredRemoteOps = [];
+let chatVoiceRecognition = null;
+let aceLineCommentVoiceRecognition = null;
+let chatVoiceAbortRequested = false;
+let aceLineCommentVoiceAbortRequested = false;
+let chatVoiceBaseDraft = "";
+let aceLineCommentVoiceBaseDraft = "";
 let applyingRemoteEditorChange = false;
 let remoteMarkerStyleInjected = false;
 const remoteMarkers = new Map();
@@ -599,6 +722,33 @@ const {
   canUseProjectFs,
   getEditor: () => editorInstance.value,
 });
+
+function handleSidebarContentVisibilityChange(nextVisible) {
+  const normalizedVisible = Boolean(nextVisible);
+  if (sidebarContentVisible.value === normalizedVisible) {
+    return;
+  }
+
+  sidebarContentVisible.value = normalizedVisible;
+  if (!normalizedVisible) {
+    stopPaneResize();
+  }
+
+  nextTick(() => {
+    scheduleEditorResize();
+  });
+}
+
+function toggleChatContentVisibility() {
+  chatContentVisible.value = !chatContentVisible.value;
+  if (!chatContentVisible.value) {
+    stopPaneResize();
+  }
+
+  nextTick(() => {
+    scheduleEditorResize();
+  });
+}
 
 function readError(errorInput) {
   if (typeof errorInput?.data?.message === "string" && errorInput.data.message.trim() !== "") {
@@ -969,6 +1119,7 @@ function hideAceLineCommentTrigger() {
 }
 
 function closeAceLineComments() {
+  stopAceLineCommentVoiceInput({ discard: true });
   aceLineCommentPopover.open = false;
   aceLineCommentDraft.value = "";
   aceLineCommentSubmitting.value = false;
@@ -1352,7 +1503,10 @@ async function createCodeCommentEntry(lineNumberInput, bodyInput) {
     return null;
   }
 
-  codeComments.value = sortCodeComments([...codeComments.value, created]);
+  codeComments.value = sortCodeComments([
+    ...codeComments.value.filter((item) => item.comment_id !== created.comment_id),
+    created,
+  ]);
   renderCodeCommentDecorations();
   notice.value = t("editor.commentAdded");
 
@@ -1364,6 +1518,7 @@ async function submitAceLineComment() {
     return;
   }
 
+  stopAceLineCommentVoiceInput({ discard: true });
   aceLineCommentSubmitting.value = true;
   error.value = "";
 
@@ -1758,14 +1913,14 @@ function schedulePresenceSync(delay = 500) {
   }, Math.max(0, Number(delay || 0)));
 }
 
-function appendChatMessage(messageInput) {
+function normalizeChatMessage(messageInput) {
   const message = messageInput || {};
   const id = Number(message.id || 0);
-  if (!id || chatMessages.value.some((item) => item.id === id)) {
-    return;
+  if (!id) {
+    return null;
   }
 
-  const normalized = {
+  return {
     id,
     user_id: Number(message.user_id || 0),
     user_name: String(message.user_name || `User #${message.user_id || "?"}`),
@@ -1775,14 +1930,511 @@ function appendChatMessage(messageInput) {
     avatar_url: normalizeAvatarUrl(message.avatar_url),
     message: String(message.message || ""),
     created_at: String(message.created_at || ""),
+    updated_at: typeof message.updated_at === "string" && message.updated_at.trim() !== ""
+      ? message.updated_at.trim()
+      : null,
   };
+}
 
-  chatMessages.value = [...chatMessages.value, normalized]
+function replaceChatMessages(messagesInput) {
+  const normalized = Array.isArray(messagesInput)
+    ? messagesInput
+      .map((item) => normalizeChatMessage(item))
+      .filter((item) => item !== null)
+    : [];
+
+  chatMessages.value = normalized
     .sort((left, right) => left.id - right.id)
     .slice(-200);
 }
 
-async function loadRealtimeChat(force = false) {
+function upsertChatMessage(messageInput) {
+  const normalized = normalizeChatMessage(messageInput);
+  if (!normalized) {
+    return;
+  }
+
+  const next = [...chatMessages.value];
+  const index = next.findIndex((item) => item.id === normalized.id);
+  if (index >= 0) {
+    next[index] = {
+      ...next[index],
+      ...normalized,
+    };
+  } else {
+    next.push(normalized);
+  }
+
+  chatMessages.value = next
+    .sort((left, right) => left.id - right.id)
+    .slice(-200);
+
+  if (chatEditingMessageId.value > 0 && chatEditingMessageId.value === normalized.id) {
+    const latest = chatMessages.value.find((item) => item.id === normalized.id);
+    if (latest) {
+      chatDraft.value = String(latest.message || "");
+    }
+  }
+}
+
+function removeChatMessageById(messageIdInput) {
+  const messageId = Number(messageIdInput || 0);
+  if (!messageId) {
+    return;
+  }
+
+  chatMessages.value = chatMessages.value.filter((item) => item.id !== messageId);
+
+  if (chatEditingMessageId.value === messageId) {
+    chatEditingMessageId.value = 0;
+    chatDraft.value = "";
+  }
+}
+
+function focusChatInput() {
+  nextTick(() => {
+    const input = chatInputRef.value;
+    if (!input || typeof input.focus !== "function") {
+      return;
+    }
+
+    input.focus();
+    if (typeof input.setSelectionRange === "function") {
+      const length = String(chatDraft.value || "").length;
+      input.setSelectionRange(length, length);
+    }
+  });
+}
+
+function focusAceLineCommentInput() {
+  nextTick(() => {
+    const input = aceLineCommentInputRef.value;
+    if (!input || typeof input.focus !== "function") {
+      return;
+    }
+
+    input.focus();
+    if (typeof input.setSelectionRange === "function") {
+      const length = String(aceLineCommentDraft.value || "").length;
+      input.setSelectionRange(length, length);
+    }
+  });
+}
+
+function startChatMessageEdit(messageInput) {
+  const normalized = normalizeChatMessage(messageInput);
+  if (!normalized) {
+    return;
+  }
+
+  if (normalized.user_id !== currentUserId.value) {
+    return;
+  }
+
+  chatEditingMessageId.value = normalized.id;
+  chatDraft.value = normalized.message;
+  focusChatInput();
+}
+
+function cancelChatMessageEdit() {
+  chatEditingMessageId.value = 0;
+  chatDraft.value = "";
+}
+
+function isMicrophoneContextAllowed() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  if (window.isSecureContext) {
+    return true;
+  }
+
+  const hostname = String(window.location?.hostname || "").toLowerCase();
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
+}
+
+function getSpeechRecognitionConstructor() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const RecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+  return typeof RecognitionCtor === "function" ? RecognitionCtor : null;
+}
+
+function isLocalVoiceInputSupported() {
+  if (typeof window === "undefined" || !isMicrophoneContextAllowed()) {
+    return false;
+  }
+
+  return Boolean(getSpeechRecognitionConstructor());
+}
+
+function resolveSpeechRecognitionLanguage() {
+  const appLocale = String(locale?.value || "").toLowerCase();
+  if (appLocale.startsWith("ru")) {
+    return "ru-RU";
+  }
+  if (appLocale.startsWith("en")) {
+    return "en-US";
+  }
+
+  const userLanguage = String(session.value?.user?.language || "").toLowerCase();
+  if (
+    userLanguage === "rus"
+    || userLanguage === "ru"
+    || userLanguage === "russian"
+    || userLanguage.startsWith("ru")
+  ) {
+    return "ru-RU";
+  }
+  if (
+    userLanguage === "eng"
+    || userLanguage === "en"
+    || userLanguage === "english"
+    || userLanguage.startsWith("en")
+  ) {
+    return "en-US";
+  }
+
+  if (typeof navigator !== "undefined" && Array.isArray(navigator.languages)) {
+    const preferred = navigator.languages.find((item) => typeof item === "string" && item.trim() !== "");
+    if (preferred) {
+      return preferred;
+    }
+  }
+
+  if (typeof navigator !== "undefined" && typeof navigator.language === "string" && navigator.language.trim() !== "") {
+    return navigator.language;
+  }
+
+  return "en-US";
+}
+
+function appendTranscriptToDraft(draftInput, transcriptInput) {
+  const transcript = String(transcriptInput || "").trim();
+  if (!transcript) {
+    return String(draftInput || "");
+  }
+
+  const draft = String(draftInput || "").trim();
+  return draft !== "" ? `${draft} ${transcript}` : transcript;
+}
+
+function applyChatVoiceTranscript(transcriptInput, baseDraftInput = chatVoiceBaseDraft) {
+  chatDraft.value = appendTranscriptToDraft(baseDraftInput, transcriptInput);
+  focusChatInput();
+}
+
+function applyAceLineCommentVoiceTranscript(transcriptInput, baseDraftInput = aceLineCommentVoiceBaseDraft) {
+  aceLineCommentDraft.value = appendTranscriptToDraft(baseDraftInput, transcriptInput);
+  focusAceLineCommentInput();
+}
+
+function mapSpeechRecognitionErrorCode(errorCodeInput) {
+  const code = String(errorCodeInput || "").trim().toLowerCase();
+
+  if (code === "not-allowed" || code === "service-not-allowed") {
+    return t("editor.chatVoicePermissionDenied");
+  }
+  if (code === "not-readable" || code === "aborted") {
+    return t("editor.chatVoiceMicrophoneBusy");
+  }
+  if (code === "audio-capture") {
+    return t("editor.chatVoiceNoMicrophone");
+  }
+  if (code === "language-not-supported" || code === "bad-grammar") {
+    return t("editor.chatVoiceLanguageUnsupported");
+  }
+  if (code === "network") {
+    return t("editor.chatVoiceNetworkError");
+  }
+  if (code === "no-speech") {
+    return t("editor.chatVoiceNoSpeech");
+  }
+
+  return t("editor.chatVoiceError");
+}
+
+function createSpeechRecognitionInstance() {
+  const RecognitionCtor = getSpeechRecognitionConstructor();
+  if (!RecognitionCtor) {
+    return null;
+  }
+
+  const recognition = new RecognitionCtor();
+  recognition.continuous = false;
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+  recognition.lang = resolveSpeechRecognitionLanguage();
+
+  return recognition;
+}
+
+function extractSpeechRecognitionTranscript(eventInput) {
+  const event = eventInput;
+  if (!event?.results) {
+    return "";
+  }
+
+  const parts = [];
+  const startIndex = Math.max(0, Number(event.resultIndex || 0));
+  for (let index = startIndex; index < event.results.length; index += 1) {
+    const result = event.results[index];
+    if (!result || result.isFinal !== true || !result[0] || typeof result[0].transcript !== "string") {
+      continue;
+    }
+    const value = result[0].transcript.trim();
+    if (value) {
+      parts.push(value);
+    }
+  }
+
+  return parts.join(" ").trim();
+}
+
+function clearChatVoiceRecognitionState(options = {}) {
+  const keepBaseDraft = options.keepBaseDraft === true;
+  chatVoiceAbortRequested = false;
+  chatVoiceListening.value = false;
+  chatVoiceRecognition = null;
+  if (!keepBaseDraft) {
+    chatVoiceBaseDraft = "";
+  }
+}
+
+function clearAceLineCommentVoiceRecognitionState(options = {}) {
+  const keepBaseDraft = options.keepBaseDraft === true;
+  aceLineCommentVoiceAbortRequested = false;
+  aceLineCommentVoiceListening.value = false;
+  aceLineCommentVoiceRecognition = null;
+  if (!keepBaseDraft) {
+    aceLineCommentVoiceBaseDraft = "";
+  }
+}
+
+function startChatVoiceRecognitionInput() {
+  const recognition = createSpeechRecognitionInstance();
+  if (!recognition) {
+    return false;
+  }
+
+  chatVoiceBaseDraft = String(chatDraft.value || "");
+  chatVoiceAbortRequested = false;
+  chatVoiceRecognition = recognition;
+  let hasTranscript = false;
+
+  recognition.onresult = (event) => {
+    if (chatVoiceAbortRequested) {
+      return;
+    }
+
+    const transcript = extractSpeechRecognitionTranscript(event);
+    if (!transcript) {
+      return;
+    }
+
+    hasTranscript = true;
+    applyChatVoiceTranscript(transcript, chatVoiceBaseDraft);
+  };
+
+  recognition.onerror = (event) => {
+    const code = String(event?.error || "").trim().toLowerCase();
+    if (chatVoiceAbortRequested && code === "aborted") {
+      return;
+    }
+
+    if (code !== "aborted") {
+      error.value = mapSpeechRecognitionErrorCode(code);
+    }
+  };
+
+  recognition.onend = () => {
+    const wasAborted = chatVoiceAbortRequested;
+    clearChatVoiceRecognitionState({ keepBaseDraft: true });
+    if (!wasAborted && !hasTranscript) {
+      error.value = t("editor.chatVoiceNoSpeech");
+    }
+    chatVoiceBaseDraft = "";
+  };
+
+  try {
+    error.value = "";
+    recognition.start();
+    chatVoiceListening.value = true;
+    return true;
+  } catch (_error) {
+    clearChatVoiceRecognitionState();
+    return false;
+  }
+}
+
+function startAceLineCommentVoiceRecognitionInput() {
+  const recognition = createSpeechRecognitionInstance();
+  if (!recognition) {
+    return false;
+  }
+
+  aceLineCommentVoiceBaseDraft = String(aceLineCommentDraft.value || "");
+  aceLineCommentVoiceAbortRequested = false;
+  aceLineCommentVoiceRecognition = recognition;
+  let hasTranscript = false;
+
+  recognition.onresult = (event) => {
+    if (aceLineCommentVoiceAbortRequested) {
+      return;
+    }
+
+    const transcript = extractSpeechRecognitionTranscript(event);
+    if (!transcript) {
+      return;
+    }
+
+    hasTranscript = true;
+    applyAceLineCommentVoiceTranscript(transcript, aceLineCommentVoiceBaseDraft);
+  };
+
+  recognition.onerror = (event) => {
+    const code = String(event?.error || "").trim().toLowerCase();
+    if (aceLineCommentVoiceAbortRequested && code === "aborted") {
+      return;
+    }
+
+    if (code !== "aborted") {
+      error.value = mapSpeechRecognitionErrorCode(code);
+    }
+  };
+
+  recognition.onend = () => {
+    const wasAborted = aceLineCommentVoiceAbortRequested;
+    clearAceLineCommentVoiceRecognitionState({ keepBaseDraft: true });
+    if (!wasAborted && !hasTranscript) {
+      error.value = t("editor.chatVoiceNoSpeech");
+    }
+    aceLineCommentVoiceBaseDraft = "";
+  };
+
+  try {
+    error.value = "";
+    recognition.start();
+    aceLineCommentVoiceListening.value = true;
+    return true;
+  } catch (_error) {
+    clearAceLineCommentVoiceRecognitionState();
+    return false;
+  }
+}
+
+async function startChatVoiceInput() {
+  if (chatVoiceListening.value) {
+    return;
+  }
+
+  stopAceLineCommentVoiceInput({ discard: true });
+
+  if (!isMicrophoneContextAllowed()) {
+    error.value = t("editor.chatVoiceSecureContextRequired");
+    return;
+  }
+
+  if (isLocalVoiceInputSupported() && startChatVoiceRecognitionInput()) {
+    return;
+  }
+
+  chatVoiceSupported.value = false;
+  error.value = t("editor.chatVoiceUnsupported");
+}
+
+function stopChatVoiceInput(options = {}) {
+  const discard = options.discard === true;
+
+  if (!chatVoiceRecognition) {
+    clearChatVoiceRecognitionState();
+    if (discard) {
+      chatVoiceBaseDraft = "";
+    }
+    return;
+  }
+
+  chatVoiceAbortRequested = discard;
+  const recognition = chatVoiceRecognition;
+
+  if (discard) {
+    chatVoiceBaseDraft = "";
+  }
+
+  try {
+    recognition.stop();
+  } catch (_error) {
+    clearChatVoiceRecognitionState();
+  }
+}
+
+function toggleChatVoiceInput() {
+  if (chatVoiceListening.value) {
+    stopChatVoiceInput();
+    return;
+  }
+
+  void startChatVoiceInput();
+}
+
+function stopAceLineCommentVoiceInput(options = {}) {
+  const discard = options.discard === true;
+
+  if (!aceLineCommentVoiceRecognition) {
+    clearAceLineCommentVoiceRecognitionState();
+    if (discard) {
+      aceLineCommentVoiceBaseDraft = "";
+    }
+    return;
+  }
+
+  aceLineCommentVoiceAbortRequested = discard;
+  const recognition = aceLineCommentVoiceRecognition;
+
+  if (discard) {
+    aceLineCommentVoiceBaseDraft = "";
+  }
+
+  try {
+    recognition.stop();
+  } catch (_error) {
+    clearAceLineCommentVoiceRecognitionState();
+  }
+}
+
+async function startAceLineCommentVoiceInput() {
+  if (!aceLineCommentPopover.open || aceLineCommentVoiceListening.value) {
+    return;
+  }
+
+  stopChatVoiceInput({ discard: true });
+
+  if (!isMicrophoneContextAllowed()) {
+    error.value = t("editor.chatVoiceSecureContextRequired");
+    return;
+  }
+
+  if (isLocalVoiceInputSupported() && startAceLineCommentVoiceRecognitionInput()) {
+    return;
+  }
+
+  chatVoiceSupported.value = false;
+  error.value = t("editor.chatVoiceUnsupported");
+}
+
+function toggleAceLineCommentVoiceInput() {
+  if (aceLineCommentVoiceListening.value) {
+    stopAceLineCommentVoiceInput();
+    return;
+  }
+
+  void startAceLineCommentVoiceInput();
+}
+
+async function loadRealtimeChat(force = false, fullSnapshot = false) {
   if (!canUseProjectFs.value || !selectedProjectId.value || chatLoading) {
     return;
   }
@@ -1791,7 +2443,9 @@ async function loadRealtimeChat(force = false) {
     return;
   }
 
-  const afterId = chatMessages.value.length > 0 ? Number(chatMessages.value[chatMessages.value.length - 1].id || 0) : 0;
+  const afterId = fullSnapshot
+    ? 0
+    : (chatMessages.value.length > 0 ? Number(chatMessages.value[chatMessages.value.length - 1].id || 0) : 0);
   chatLoading = true;
 
   try {
@@ -1806,25 +2460,12 @@ async function loadRealtimeChat(force = false) {
     });
 
     const incoming = Array.isArray(response.data?.messages) ? response.data.messages : [];
-    if (afterId <= 0) {
-      chatMessages.value = incoming
-        .map((item) => ({
-          id: Number(item?.id || 0),
-          user_id: Number(item?.user_id || 0),
-          user_name: String(item?.user_name || ""),
-          avatar_preset: typeof item?.avatar_preset === "string" && item.avatar_preset.trim() !== ""
-            ? item.avatar_preset.trim()
-            : defaultAvatarPreset,
-          avatar_url: normalizeAvatarUrl(item?.avatar_url),
-          message: String(item?.message || ""),
-          created_at: String(item?.created_at || ""),
-        }))
-        .filter((item) => item.id > 0)
-        .slice(-200);
+    if (fullSnapshot || afterId <= 0) {
+      replaceChatMessages(incoming);
       return;
     }
 
-    incoming.forEach((item) => appendChatMessage(item));
+    incoming.forEach((item) => upsertChatMessage(item));
   } catch (_chatError) {
     // Chat polling is best-effort.
   } finally {
@@ -1837,30 +2478,70 @@ async function sendChatMessage() {
     return;
   }
 
-  const text = String(chatDraft.value || "").trim();
+  const text = chatDraftTrimmed.value;
   if (!text) {
     return;
   }
 
   chatSending.value = true;
   error.value = "";
+  const editingMessageId = Number(chatEditingMessageId.value || 0);
+  const editingMode = editingMessageId > 0;
 
   try {
     const response = await request({
-      method: "POST",
-      path: `/projects/${selectedProjectId.value}/realtime/chat`,
+      method: editingMode ? "PATCH" : "POST",
+      path: editingMode
+        ? `/projects/${selectedProjectId.value}/realtime/chat/${editingMessageId}`
+        : `/projects/${selectedProjectId.value}/realtime/chat`,
       auth: true,
       body: {
         message: text,
       },
     });
 
-    appendChatMessage(response.data?.message);
+    upsertChatMessage(response.data?.message);
+    chatEditingMessageId.value = 0;
     chatDraft.value = "";
   } catch (chatError) {
     error.value = readError(chatError);
   } finally {
     chatSending.value = false;
+  }
+}
+
+async function deleteChatMessage(messageInput) {
+  if (!canUseProjectFs.value || !selectedProjectId.value) {
+    return;
+  }
+
+  const normalized = normalizeChatMessage(messageInput);
+  if (!normalized || normalized.user_id !== currentUserId.value) {
+    return;
+  }
+
+  const messageId = Number(normalized.id || 0);
+  if (!messageId) {
+    return;
+  }
+
+  chatDeletingMessageId.value = messageId;
+  error.value = "";
+
+  try {
+    await request({
+      method: "DELETE",
+      path: `/projects/${selectedProjectId.value}/realtime/chat/${messageId}`,
+      auth: true,
+    });
+
+    removeChatMessageById(messageId);
+  } catch (chatError) {
+    error.value = readError(chatError);
+  } finally {
+    if (chatDeletingMessageId.value === messageId) {
+      chatDeletingMessageId.value = 0;
+    }
   }
 }
 
@@ -1978,15 +2659,13 @@ function applyRemoteEditorOperation(rawPayload) {
     return;
   }
 
-  if (envelope.client_id === realtimeClientId.value) {
-    if (editorSyncInflightOp && envelope.op_id && envelope.op_id === editorSyncInflightOp.op_id) {
-      editorSyncRevision.value = Math.max(editorSyncRevision.value, envelope.revision);
-      editorSyncInflightOp = null;
-      editorSyncBusy.value = false;
-      applyDeferredRemoteEditorOperations();
-      if (editorSyncPendingOps.length > 0) {
-        scheduleEditorSync();
-      }
+  if (editorSyncInflightOp && envelope.op_id && envelope.op_id === editorSyncInflightOp.op_id) {
+    editorSyncRevision.value = Math.max(editorSyncRevision.value, envelope.revision);
+    editorSyncInflightOp = null;
+    editorSyncBusy.value = false;
+    applyDeferredRemoteEditorOperations();
+    if (editorSyncPendingOps.length > 0) {
+      scheduleEditorSync();
     }
 
     return;
@@ -2211,21 +2890,26 @@ function buildReplaceOperation(fromTextInput, toTextInput) {
 
 async function bootstrapEditorRealtimeState(seedContent = "", options = {}) {
   const normalizedOptions = options || {};
+  const includeSeedContent = normalizedOptions.includeSeedContent !== false;
   if (!canUseProjectFs.value || !selectedProjectId.value || !activeProjectPath.value) {
     resetEditorSyncState();
     return;
   }
 
   try {
+    const body = {
+      path: activeProjectPath.value,
+      reset: normalizedOptions.reset === true,
+    };
+    if (includeSeedContent || normalizedOptions.reset === true) {
+      body.seed_content = String(seedContent || "");
+    }
+
     const response = await request({
       method: "POST",
       path: `/projects/${selectedProjectId.value}/realtime/editor-state`,
       auth: true,
-      body: {
-        path: activeProjectPath.value,
-        seed_content: String(seedContent || ""),
-        reset: normalizedOptions.reset === true,
-      },
+      body,
     });
 
     const remoteRevision = Math.max(0, Number(response.data?.revision || 0));
@@ -2352,8 +3036,8 @@ async function flushEditorSyncQueue() {
       if (requiresResync) {
         const localSnapshot = String(currentText.value || "");
         await bootstrapEditorRealtimeState(localSnapshot, {
-          reset: true,
           preserveLocal: true,
+          includeSeedContent: false,
         });
         editorSyncBusy.value = false;
         editorSyncInflightOp = null;
@@ -2417,7 +3101,9 @@ function scheduleRealtimeSubscriptionWatchdog() {
   realtimeSubscribeWatchTimerId = window.setTimeout(() => {
     realtimeSubscribeWatchTimerId = null;
     if (!realtimeChannelSubscribed && canUseProjectFs.value) {
-      void startRealtimeSession();
+      const forceRestart = realtimeSubscribeAttempts > 0;
+      realtimeSubscribeAttempts += 1;
+      void startRealtimeSession({ forceRestart });
     }
   }, 2500);
 }
@@ -2473,18 +3159,25 @@ function stopRealtimeSession() {
   activeRealtimeProjectId = "";
   realtimeChannel = null;
   realtimeChannelSubscribed = false;
+  realtimeSubscribeAttempts = 0;
 }
 
 function resetRealtimeState() {
   stopRealtimeSession();
   resetEditorSyncState();
+  stopChatVoiceInput({ discard: true });
+  stopAceLineCommentVoiceInput({ discard: true });
   realtimePeers.value = [];
   chatMessages.value = [];
   chatDraft.value = "";
+  chatEditingMessageId.value = 0;
+  chatDeletingMessageId.value = 0;
   clearAllPeerMarkers();
 }
 
-async function startRealtimeSession() {
+async function startRealtimeSession(options = {}) {
+  const forceRestart = Boolean(options?.forceRestart);
+
   if (!canUseProjectFs.value || !selectedProjectId.value || !isAuthenticated.value) {
     resetRealtimeState();
     return;
@@ -2496,15 +3189,22 @@ async function startRealtimeSession() {
     return;
   }
 
-  if (activeRealtimeProjectId && activeRealtimeProjectId === String(selectedProjectId.value) && realtimeChannel) {
+  if (!forceRestart && activeRealtimeProjectId && activeRealtimeProjectId === String(selectedProjectId.value) && realtimeChannel) {
+    if (!realtimeChannelSubscribed) {
+      scheduleRealtimeSubscriptionWatchdog();
+    }
     return;
   }
 
   stopRealtimeSession();
+  if (forceRestart) {
+    disconnectRealtimeClient();
+  }
   clearAllPeerMarkers();
   realtimePeers.value = [];
   activeRealtimeProjectId = String(selectedProjectId.value);
   realtimeChannelSubscribed = false;
+  realtimeSubscribeAttempts = 0;
 
   const channel = joinProjectRealtimeChannel(selectedProjectId.value, token);
   if (!channel) {
@@ -2513,9 +3213,11 @@ async function startRealtimeSession() {
   }
 
   realtimeChannel = channel;
+  scheduleRealtimeSubscriptionWatchdog();
 
   channel.subscribed(() => {
     realtimeChannelSubscribed = true;
+    realtimeSubscribeAttempts = 0;
     if (realtimeSubscribeWatchTimerId !== null && typeof window !== "undefined") {
       window.clearTimeout(realtimeSubscribeWatchTimerId);
       realtimeSubscribeWatchTimerId = null;
@@ -2524,6 +3226,7 @@ async function startRealtimeSession() {
 
   channel.error(() => {
     realtimeChannelSubscribed = false;
+    realtimeSubscribeAttempts = Math.max(realtimeSubscribeAttempts, 1);
     scheduleRealtimeSubscriptionWatchdog();
   });
 
@@ -2532,7 +3235,15 @@ async function startRealtimeSession() {
   });
 
   channel.listen(".realtime.chat.message", (payload) => {
-    appendChatMessage(payload?.message || payload);
+    upsertChatMessage(payload?.message || payload);
+  });
+
+  channel.listen(".realtime.chat.updated", (payload) => {
+    upsertChatMessage(payload?.message || payload);
+  });
+
+  channel.listen(".realtime.chat.deleted", (payload) => {
+    removeChatMessageById(payload?.message_id || payload?.id || 0);
   });
 
   channel.listen(".realtime.project.participants.updated", () => {
@@ -2565,7 +3276,7 @@ async function startRealtimeSession() {
     void loadTree();
   });
 
-  await loadRealtimeChat(true);
+  await loadRealtimeChat(true, true);
   await syncPresenceHeartbeat();
 
   if (typeof window !== "undefined") {
@@ -2574,7 +3285,7 @@ async function startRealtimeSession() {
     }
     chatFallbackPollTimerId = window.setInterval(() => {
       if (!realtimeChannelSubscribed) {
-        void loadRealtimeChat();
+        void loadRealtimeChat(false, true);
       }
     }, 8000);
 
@@ -2738,6 +3449,42 @@ async function saveFile() {
   }
 }
 
+async function saveActiveProjectFileForRun() {
+  if (!dirty.value) {
+    return true;
+  }
+
+  if (!isProjectRoute.value || !canUseProjectFs.value || !activeProjectPath.value) {
+    error.value = t("editor.projectNotSelected");
+    return false;
+  }
+
+  saving.value = true;
+  error.value = "";
+
+  try {
+    const response = await request({
+      method: "PUT",
+      path: `/projects/${selectedProjectId.value}/filesystem/file`,
+      auth: true,
+      body: {
+        path: activeProjectPath.value,
+        content: currentText.value,
+      },
+    });
+
+    dirty.value = false;
+    lastKnownFileUpdatedAt.value = String(response.data?.updated_at || "");
+    await loadTree();
+    return true;
+  } catch (saveError) {
+    error.value = readError(saveError);
+    return false;
+  } finally {
+    saving.value = false;
+  }
+}
+
 function downloadFile() {
   const blob = new Blob([currentText.value || ""], { type: "text/plain;charset=utf-8" });
   const url = window.URL.createObjectURL(blob);
@@ -2876,6 +3623,7 @@ onMounted(() => {
   restoreGuest();
   editorTheme.value = resolveDefaultEditorTheme(session);
   syncProjectIdFromRoute();
+  chatVoiceSupported.value = isLocalVoiceInputSupported();
 
   if (route.query.forgejo === "connected") {
     notice.value = t("editor.authConnectedNotice");
@@ -2905,6 +3653,8 @@ onUnmounted(() => {
   window.removeEventListener("auth-changed", onAuthChanged);
   window.removeEventListener("pointerdown", handleDocumentPointerDown);
   detachAceLineCommentHandlers();
+  stopChatVoiceInput({ discard: true });
+  stopAceLineCommentVoiceInput({ discard: true });
   resetRealtimeState();
   resetCodeCommentsState();
   disconnectRealtimeClient();

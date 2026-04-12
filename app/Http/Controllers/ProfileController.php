@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -49,13 +50,30 @@ class ProfileController extends Controller
 
         $data = $request->validate([
             'name' => ['sometimes', 'required', 'string', 'max:255'],
+            'email' => [
+                'sometimes',
+                'required',
+                'string',
+                'email',
+                'max:255',
+                Rule::unique('users', 'email')->ignore($user->user_id, 'user_id'),
+            ],
             'language' => ['sometimes', 'required', 'string', Rule::in(['rus', 'eng'])],
             'theme' => ['sometimes', 'required', 'string', Rule::in(self::THEMES)],
             'avatar_preset' => ['nullable', 'string', Rule::in(self::AVATAR_PRESETS)],
+            'new_password' => ['sometimes', 'required', 'string', 'min:8', 'max:255', 'confirmed'],
         ]);
+
+        $emailChanged = array_key_exists('email', $data)
+            && (string) $data['email'] !== (string) $user->email;
+        $passwordChanged = array_key_exists('new_password', $data);
 
         if (array_key_exists('name', $data)) {
             $user->name = $data['name'];
+        }
+
+        if (array_key_exists('email', $data)) {
+            $user->email = $data['email'];
         }
 
         if (array_key_exists('language', $data)) {
@@ -64,6 +82,10 @@ class ProfileController extends Controller
 
         if (array_key_exists('theme', $data)) {
             $user->theme = $data['theme'];
+        }
+
+        if (array_key_exists('new_password', $data)) {
+            $user->password_hash = Hash::make($data['new_password']);
         }
 
         if (array_key_exists('avatar_preset', $data) && $data['avatar_preset'] !== null) {
@@ -78,7 +100,14 @@ class ProfileController extends Controller
 
         $user->save();
 
-        return response()->json($this->serializeUser($user->fresh()));
+        if ($emailChanged || $passwordChanged) {
+            $user->tokens()->delete();
+        }
+
+        $payload = $this->serializeUser($user->fresh());
+        $payload['logged_out_all'] = $emailChanged || $passwordChanged;
+
+        return response()->json($payload);
     }
 
     public function uploadAvatar(Request $request): JsonResponse

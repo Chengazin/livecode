@@ -2,22 +2,68 @@ const fs = require("node:fs");
 const path = require("node:path");
 const pty = require("node-pty");
 
-function resolveDirectory(fallback, candidate) {
-  const base = path.resolve(String(fallback || process.cwd()));
-  const target = path.resolve(String(candidate || base));
+function isPathInside(basePath, targetPath) {
+  const relative = path.relative(basePath, targetPath);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
 
-  const relative = path.relative(base, target);
-  const isInside = relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+function realpathDirectory(value) {
+  const absolute = path.resolve(String(value || process.cwd()));
 
-  if (!isInside) {
+  if (!fs.existsSync(absolute)) {
+    return null;
+  }
+
+  let stats = null;
+  try {
+    stats = fs.statSync(absolute);
+  } catch (_error) {
+    return null;
+  }
+
+  if (!stats.isDirectory()) {
+    return null;
+  }
+
+  try {
+    if (typeof fs.realpathSync.native === "function") {
+      return fs.realpathSync.native(absolute);
+    }
+
+    return fs.realpathSync(absolute);
+  } catch (_error) {
+    return null;
+  }
+}
+
+function ensureDirectoryWithin(basePath, targetPath, options = {}) {
+  const strict = Boolean(options.strict);
+  const label = String(options.label || "directory");
+  const base = realpathDirectory(basePath);
+
+  if (!base) {
+    throw new Error(`Ticket ${label} base is invalid.`);
+  }
+
+  const candidate = realpathDirectory(targetPath || base);
+
+  if (!candidate) {
+    if (strict) {
+      throw new Error(`Ticket ${label} is invalid.`);
+    }
+
     return base;
   }
 
-  if (!fs.existsSync(target) || !fs.statSync(target).isDirectory()) {
+  if (!isPathInside(base, candidate)) {
+    if (strict) {
+      throw new Error(`Ticket ${label} is outside sandbox.`);
+    }
+
     return base;
   }
 
-  return target;
+  return candidate;
 }
 
 function normalizeRows(value, fallback = 24) {
@@ -39,8 +85,13 @@ function normalizeCols(value, fallback = 80) {
 }
 
 function normalizeRunner(value) {
-  const normalized = String(value || "host").trim().toLowerCase();
-  return normalized === "docker" ? "docker" : "host";
+  const normalized = String(value || "docker").trim().toLowerCase();
+
+  if (normalized === "host") {
+    return "host";
+  }
+
+  return "docker";
 }
 
 function normalizeShell(shellName) {
@@ -103,6 +154,30 @@ function normalizeRelativeCwd(value) {
   return safeSegments.join("/");
 }
 
+function normalizeTmpfsMount(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+
+  if (raw.includes(":")) {
+    return raw;
+  }
+
+  const normalizedPath = normalizeContainerWorkdir(raw);
+  return `${normalizedPath}:rw,noexec,nosuid,nodev,size=64m`;
+}
+
+function normalizeTmpfsMounts(values) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+
+  return values
+    .map((item) => normalizeTmpfsMount(item))
+    .filter(Boolean);
+}
+
 function buildContainerName(ticketPayload) {
   const projectId = Number(ticketPayload.project_id || 0);
   const sessionId = Number(ticketPayload.terminal_session_id || 0);
@@ -123,6 +198,21 @@ function safeJsonSend(socket, payload) {
   }
 }
 
+function normalizeTerminalInput(data, session) {
+  const value = String(data || "");
+  if (!value) {
+    return "";
+  }
+
+  // Browser terminals may send CRLF/CR on Enter; normalize for unix/docker PTY
+  // so shells do not receive trailing "\r" inside command arguments.
+  if (session && (session.runtime === "docker" || process.platform !== "win32")) {
+    return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  }
+
+  return value;
+}
+
 class PtyManager {
   constructor(config, logger = console) {
     this.config = {
@@ -135,7 +225,8 @@ class PtyManager {
       defaultCols: normalizeCols(config.defaultCols || 100),
       defaultRows: normalizeRows(config.defaultRows || 30),
       env: config.env && typeof config.env === "object" ? { ...config.env } : {},
-      runner: normalizeRunner(config.runner || "host"),
+      runner: normalizeRunner(config.runner || "docker"),
+      allowUnsafeHostRunner: Boolean(config.allowUnsafeHostRunner),
       dockerBinary: String(config.dockerBinary || "docker").trim() || "docker",
       dockerImage: String(config.dockerImage || "alpine:3.20").trim() || "alpine:3.20",
       dockerShell: String(config.dockerShell || "/bin/sh").trim() || "/bin/sh",
@@ -144,12 +235,23 @@ class PtyManager {
       dockerCpus: String(config.dockerCpus || "").trim(),
       dockerMemory: String(config.dockerMemory || "").trim(),
       dockerPidsLimit: String(config.dockerPidsLimit || "").trim(),
+      dockerUser: String(config.dockerUser || "").trim(),
+      dockerCapDropAll: Boolean(config.dockerCapDropAll),
+      dockerNoNewPrivileges: Boolean(config.dockerNoNewPrivileges),
+      dockerTmpfsMounts: normalizeTmpfsMounts(config.dockerTmpfsMounts || []),
+      dockerHome: normalizeContainerWorkdir(config.dockerHome || ""),
       dockerReadOnly: Boolean(config.dockerReadOnly),
       dockerExtraArgs: Array.isArray(config.dockerExtraArgs)
         ? config.dockerExtraArgs.map((item) => String(item || "").trim()).filter(Boolean)
         : [],
       onSessionClosed: typeof config.onSessionClosed === "function" ? config.onSessionClosed : null,
     };
+
+    if (this.config.runner === "host" && !this.config.allowUnsafeHostRunner) {
+      throw new Error(
+        "Host runner is disabled for security. Use docker runner or explicitly set TERMINAL_GATEWAY_ALLOW_UNSAFE_HOST_RUNNER=true in trusted single-tenant environments."
+      );
+    }
 
     this.logger = logger;
     this.sessions = new Map();
@@ -234,7 +336,12 @@ class PtyManager {
       }
 
       if (data) {
-        session.pty.write(data);
+        const normalizedInput = normalizeTerminalInput(data, session);
+        if (!normalizedInput) {
+          return;
+        }
+
+        session.pty.write(normalizedInput);
         this.touchSession(session);
       }
       return;
@@ -359,6 +466,7 @@ class PtyManager {
       shell: spawnSpec.displayShell,
       cwd: spawnSpec.displayCwd,
       runtime: spawnSpec.runtime,
+      ownerRoot: spawnSpec.ownerRoot,
       projectRoot: spawnSpec.projectRoot,
       cols: spawnSpec.cols,
       rows: spawnSpec.rows,
@@ -428,8 +536,19 @@ class PtyManager {
   }
 
   buildSpawnSpec(ticketPayload, dimensions) {
-    const projectRoot = resolveDirectory(ticketPayload.project_root, ticketPayload.project_root);
-    const cwd = resolveDirectory(projectRoot, ticketPayload.cwd);
+    const ownerRoot = ensureDirectoryWithin(
+      ticketPayload.owner_root || ticketPayload.project_root,
+      ticketPayload.owner_root || ticketPayload.project_root,
+      { strict: true, label: "owner root" }
+    );
+    const projectRoot = ensureDirectoryWithin(ownerRoot, ticketPayload.project_root, {
+      strict: true,
+      label: "project root",
+    });
+    const cwd = ensureDirectoryWithin(projectRoot, ticketPayload.cwd, {
+      strict: false,
+      label: "cwd",
+    });
     const cols = normalizeCols(dimensions.cols, this.config.defaultCols);
     const rows = normalizeRows(dimensions.rows, this.config.defaultRows);
 
@@ -438,10 +557,19 @@ class PtyManager {
       ...this.config.env,
       TERM: "xterm-256color",
       COLORTERM: "truecolor",
+      LIVECODE_TERMINAL_OWNER_ROOT: ownerRoot,
+      LIVECODE_TERMINAL_PROJECT_ROOT: projectRoot,
     };
+
+    if (process.platform === "win32") {
+      env.USERPROFILE = projectRoot;
+    } else {
+      env.HOME = projectRoot;
+    }
 
     if (this.config.runner === "docker") {
       return this.buildDockerSpawnSpec(ticketPayload, {
+        ownerRoot,
         projectRoot,
         cwd,
         cols,
@@ -467,6 +595,7 @@ class PtyManager {
       runtime: "host",
       displayShell: shell,
       displayCwd: cwd,
+      ownerRoot,
       projectRoot,
       cols,
       rows,
@@ -478,6 +607,7 @@ class PtyManager {
     const dockerImage = this.config.dockerImage;
     const dockerShell = this.config.dockerShell;
     const dockerWorkdir = this.config.dockerWorkdir;
+    const dockerHome = this.config.dockerHome || dockerWorkdir;
     const relativeCwd = normalizeRelativeCwd(ticketPayload.cwd_relative || "/");
     const containerWorkdir = relativeCwd
       ? `${dockerWorkdir}/${relativeCwd}`.replace(/\/+/g, "/")
@@ -489,6 +619,7 @@ class PtyManager {
       "run",
       "--rm",
       "-i",
+      "-t",
       "--name",
       buildContainerName(ticketPayload),
       "--network",
@@ -497,7 +628,33 @@ class PtyManager {
       mountArg,
       "-w",
       containerWorkdir,
+      "-e",
+      "TERM=xterm-256color",
+      "-e",
+      "COLORTERM=truecolor",
+      "-e",
+      `HOME=${dockerHome}`,
+      "-e",
+      `LIVECODE_TERMINAL_PROJECT_ROOT=${dockerWorkdir}`,
     ];
+
+    if (this.config.dockerNoNewPrivileges) {
+      args.push("--security-opt", "no-new-privileges");
+    }
+
+    if (this.config.dockerCapDropAll) {
+      args.push("--cap-drop", "ALL");
+    }
+
+    if (this.config.dockerUser) {
+      args.push("--user", this.config.dockerUser);
+    }
+
+    if (this.config.dockerTmpfsMounts.length > 0) {
+      for (const tmpfsMount of this.config.dockerTmpfsMounts) {
+        args.push("--tmpfs", tmpfsMount);
+      }
+    }
 
     if (this.config.dockerReadOnly) {
       args.push("--read-only");
@@ -536,6 +693,7 @@ class PtyManager {
       runtime: "docker",
       displayShell: `${dockerImage}:${dockerShell}`,
       displayCwd: containerWorkdir,
+      ownerRoot: state.ownerRoot,
       projectRoot: state.projectRoot,
       cols: state.cols,
       rows: state.rows,

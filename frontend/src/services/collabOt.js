@@ -24,18 +24,50 @@ export function getOrCreateRealtimeClientId() {
     return `server-${randomToken()}`;
   }
 
-  try {
-    const existing = String(window.localStorage.getItem(CLIENT_ID_STORAGE_KEY) || "").trim();
-    if (existing) {
-      return existing;
-    }
+  let hasSessionStorage = false;
 
-    const created = `client-${randomToken()}`;
-    window.localStorage.setItem(CLIENT_ID_STORAGE_KEY, created);
-    return created;
+  try {
+    hasSessionStorage = Boolean(window.sessionStorage);
   } catch (_error) {
-    return `client-${randomToken()}`;
+    hasSessionStorage = false;
   }
+
+  if (hasSessionStorage) {
+    try {
+      const fromSession = String(window.sessionStorage.getItem(CLIENT_ID_STORAGE_KEY) || "").trim();
+      if (fromSession) {
+        return fromSession;
+      }
+
+      const created = `client-${randomToken()}`;
+      window.sessionStorage.setItem(CLIENT_ID_STORAGE_KEY, created);
+      return created;
+    } catch (_error) {
+      // Fall through to localStorage fallback.
+    }
+  }
+
+  try {
+    const fromLocal = String(window.localStorage?.getItem(CLIENT_ID_STORAGE_KEY) || "").trim();
+    if (fromLocal) {
+      return fromLocal;
+    }
+  } catch (_error) {
+    // Fallback below.
+  }
+
+  const created = `client-${randomToken()}`;
+
+  try {
+    if (window.localStorage) {
+      window.localStorage.setItem(CLIENT_ID_STORAGE_KEY, created);
+      return created;
+    }
+  } catch (_error) {
+    // Ignore storage errors.
+  }
+
+  return created;
 }
 
 export function createRealtimeOperationId() {

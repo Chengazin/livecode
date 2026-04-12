@@ -31,6 +31,10 @@ Optional:
 Runner mode:
 
 - `TERMINAL_GATEWAY_RUNNER=host|docker` (default: `docker`)
+- `TERMINAL_GATEWAY_ALLOW_UNSAFE_HOST_RUNNER=true|false` (default: `false`)
+
+`host` runner executes shells on the gateway host and cannot enforce hard filesystem isolation for multi-tenant use.
+Use `docker` runner for shared environments.
 
 Docker runner options (`TERMINAL_GATEWAY_RUNNER=docker`):
 
@@ -42,6 +46,11 @@ Docker runner options (`TERMINAL_GATEWAY_RUNNER=docker`):
 - `TERMINAL_DOCKER_CPU_LIMIT` (example: `1.0`)
 - `TERMINAL_DOCKER_MEMORY_LIMIT` (example: `512m`)
 - `TERMINAL_DOCKER_PIDS_LIMIT` (example: `256`)
+- `TERMINAL_DOCKER_USER` (optional, example: `65534:65534` for non-root)
+- `TERMINAL_DOCKER_CAP_DROP_ALL` (`true|false`, default: `true`)
+- `TERMINAL_DOCKER_NO_NEW_PRIVILEGES` (`true|false`, default: `true`)
+- `TERMINAL_DOCKER_TMPFS_MOUNTS` (comma-separated, default: `/tmp`)
+- `TERMINAL_DOCKER_HOME` (default: `/workspace`)
 - `TERMINAL_DOCKER_READ_ONLY` (`true|false`, default: `true`)
 - `TERMINAL_DOCKER_EXTRA_ARGS` (comma-separated extra docker run args)
 

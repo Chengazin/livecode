@@ -109,13 +109,27 @@ class ProjectTerminalService
             $disk->makeDirectory($projectPath);
         }
 
+        $ownerPath = $this->ownerPathFromProjectPath($projectPath);
+        if ($ownerPath === '') {
+            throw new InvalidArgumentException('invalid_project_root');
+        }
+
+        if (! $disk->exists($ownerPath)) {
+            $disk->makeDirectory($ownerPath);
+        }
+
+        $ownerRootAbsolute = $disk->path($ownerPath);
         $projectRootAbsolute = $disk->path($projectPath);
+        if (! $this->isAbsolutePathWithin($ownerRootAbsolute, $projectRootAbsolute)) {
+            throw new InvalidArgumentException('invalid_project_root');
+        }
+
         $cwdRelative = $this->normalizeCwd($project, (string) $session->cwd);
 
         $cwdAbsolute = $projectRootAbsolute;
         if ($cwdRelative !== '/') {
             $cwdAbsolute = $disk->path($projectPath.'/'.ltrim($cwdRelative, '/'));
-            if (! is_dir($cwdAbsolute)) {
+            if (! is_dir($cwdAbsolute) || ! $this->isAbsolutePathWithin($projectRootAbsolute, $cwdAbsolute)) {
                 $cwdAbsolute = $projectRootAbsolute;
             }
         }
@@ -128,6 +142,7 @@ class ProjectTerminalService
             'iss' => 'livecode-terminal',
             'terminal_session_id' => (int) $session->terminal_session_id,
             'project_id' => (int) $project->project_id,
+            'owner_root' => $ownerRootAbsolute,
             'project_root' => $projectRootAbsolute,
             'cwd' => $cwdAbsolute,
             'cwd_relative' => $cwdRelative,
@@ -413,6 +428,52 @@ class ProjectTerminalService
         }
 
         return $value;
+    }
+
+    private function ownerPathFromProjectPath(string $projectPath): string
+    {
+        $normalized = trim(str_replace('\\', '/', $projectPath), '/');
+        if ($normalized === '') {
+            return '';
+        }
+
+        $ownerPath = trim(str_replace('\\', '/', dirname($normalized)), '/');
+        if ($ownerPath === '' || $ownerPath === '.') {
+            return $normalized;
+        }
+
+        return $ownerPath;
+    }
+
+    private function isAbsolutePathWithin(string $basePath, string $targetPath): bool
+    {
+        $base = $this->normalizeAbsolutePath($basePath);
+        $target = $this->normalizeAbsolutePath($targetPath);
+
+        if ($base === '' || $target === '') {
+            return false;
+        }
+
+        if (DIRECTORY_SEPARATOR === '\\') {
+            $base = strtolower($base);
+            $target = strtolower($target);
+        }
+
+        if ($target === $base) {
+            return true;
+        }
+
+        return str_starts_with($target, $base.'/');
+    }
+
+    private function normalizeAbsolutePath(string $value): string
+    {
+        $resolved = @realpath($value);
+        $path = is_string($resolved) && $resolved !== ''
+            ? $resolved
+            : $value;
+
+        return rtrim(str_replace('\\', '/', (string) $path), '/');
     }
 
     /**

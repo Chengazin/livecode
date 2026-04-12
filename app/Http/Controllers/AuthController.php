@@ -3,9 +3,27 @@ namespace App\Http\Controllers;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 
 class AuthController extends Controller
 {
+    /**
+     * Register a new user with secure password hashing.
+     *
+     * Passwords are hashed using bcrypt with a configurable number of rounds.
+     * Each password hash is automatically salted during the hashing process.
+     * The salt ensures that identical passwords produce different hashes,
+     * making rainbow table attacks infeasible.
+     *
+     * Security features:
+     * - Bcrypt hashing with automatic salt generation
+     * - Configurable rounds (BCRYPT_ROUNDS env variable, default: 12)
+     * - Email uniqueness validation
+     * - Rate limiting on registration endpoint
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
     public function register(Request $request)
     {
         $data = $request->validate([
@@ -16,24 +34,54 @@ class AuthController extends Controller
             'device_name' => ['sometimes', 'string', 'max:255'],
         ]);
 
-        $user = User::query()->create([
-            'name' => $data['name'],
-            'email' => $data['email'],
-            'password_hash' => Hash::make($data['password']),
-            'status' => 'active',
-            'language' => $data['language'] ?? 'rus',
-        ]);
+        try {
+            // Create user with hashed password
+            // Hash::make() automatically generates a unique salt for each password
+            // and uses bcrypt algorithm as configured in config/hashing.php
+            $user = User::query()->create([
+                'name' => $data['name'],
+                'email' => $data['email'],
+                'password_hash' => Hash::make($data['password']),
+                'status' => 'active',
+                'language' => $data['language'] ?? 'rus',
+            ]);
 
-        $tokenName = $data['device_name'] ?? 'api';
-        $plainTextToken = $user->createToken($tokenName)->plainTextToken;
+            // Create API token
+            $tokenName = $data['device_name'] ?? 'api';
+            $plainTextToken = $user->createToken($tokenName)->plainTextToken;
 
-        return response()->json([
-            'token_type' => 'Bearer',
-            'access_token' => $plainTextToken,
-            'user' => $this->serializeUser($user),
-        ], 201);
+            // Log successful registration
+            Log::info('User registered successfully', [
+                'user_id' => $user->user_id,
+                'email' => $user->email,
+            ]);
+
+            return response()->json([
+                'token_type' => 'Bearer',
+                'access_token' => $plainTextToken,
+                'user' => $this->serializeUser($user),
+            ], 201);
+        } catch (\Exception $e) {
+            // Log registration failure
+            Log::warning('User registration failed', [
+                'email' => $data['email'] ?? 'unknown',
+                'error' => $e->getMessage(),
+            ]);
+
+            throw $e;
+        }
     }
 
+    /**
+     * Authenticate user and return API token.
+     *
+     * Uses Hash::check() to verify the provided password against the stored
+     * bcrypt hash. This method safely compares the password without revealing
+     * timing information about the comparison.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
     public function login(Request $request)
     {
         $data = $request->validate([
@@ -50,11 +98,20 @@ class AuthController extends Controller
             || $user->status !== 'active'
         ) {
             // Deliberately return the same error for auth failures to reduce account enumeration.
+            Log::info('Login attempt failed', [
+                'email' => $data['email'] ?? 'unknown',
+            ]);
             return response()->json(['message' => 'Invalid credentials.'], 401);
         }
 
         $tokenName = $data['device_name'] ?? 'api';
         $plainTextToken = $user->createToken($tokenName)->plainTextToken;
+
+        // Log successful login
+        Log::info('User logged in successfully', [
+            'user_id' => $user->user_id,
+            'email' => $user->email,
+        ]);
 
         return response()->json([
             'token_type' => 'Bearer',
@@ -96,3 +153,4 @@ class AuthController extends Controller
         return $payload;
     }
 }
+

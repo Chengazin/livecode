@@ -34,7 +34,12 @@
           {{ t("editor.terminalDockHide") }}
         </button>
       </div>
-      <ProjectTerminalPanel :project-id="selectedProjectId" :embedded="true" />
+      <ProjectTerminalPanel
+        :project-id="selectedProjectId"
+        :active-file-path="activeProjectPath"
+        :before-run-active-file="beforeRunActiveFile"
+        :embedded="true"
+      />
     </div>
   </div>
 </template>
@@ -63,6 +68,14 @@ defineProps({
   selectedProjectId: {
     type: [String, Number],
     default: "",
+  },
+  activeProjectPath: {
+    type: String,
+    default: "",
+  },
+  beforeRunActiveFile: {
+    type: Function,
+    default: null,
   },
 });
 

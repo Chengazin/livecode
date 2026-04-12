@@ -46,4 +46,17 @@ return [
         'auto_link_by_email' => (bool) env('FORGEJO_AUTO_LINK_BY_EMAIL', false),
     ],
 
+    'speech' => [
+        'local' => [
+            'python_binary' => env('SPEECH_LOCAL_PYTHON', 'python'),
+            'script_path' => env('SPEECH_LOCAL_SCRIPT', 'tools/local_transcribe.py'),
+            'model' => env('SPEECH_LOCAL_MODEL', 'small'),
+            'device' => env('SPEECH_LOCAL_DEVICE', 'cpu'),
+            'compute_type' => env('SPEECH_LOCAL_COMPUTE_TYPE', 'int8'),
+            'beam_size' => (int) env('SPEECH_LOCAL_BEAM_SIZE', 1),
+            'vad_filter' => (bool) env('SPEECH_LOCAL_VAD_FILTER', false),
+            'timeout' => (int) env('SPEECH_LOCAL_TIMEOUT', 120),
+        ],
+    ],
+
 ];

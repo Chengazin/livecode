@@ -28,6 +28,15 @@
       </button>
 
       <button
+        class="btn btn-sm btn-secondary"
+        type="button"
+        :disabled="runningActiveFile || !activeFilePath"
+        @click="runActiveFile"
+      >
+        {{ runningActiveFile ? t("common.saving") : t("editor.terminalRunActiveFile") }}
+      </button>
+
+      <button
         v-if="openSessions.length > 0"
         class="btn btn-sm btn-secondary"
         type="button"
@@ -79,6 +88,14 @@ const props = defineProps({
     type: [String, Number],
     default: "",
   },
+  activeFilePath: {
+    type: String,
+    default: "",
+  },
+  beforeRunActiveFile: {
+    type: Function,
+    default: null,
+  },
   embedded: {
     type: Boolean,
     default: false,
@@ -96,6 +113,9 @@ const closingSession = ref(false);
 const connecting = ref(false);
 const connected = ref(false);
 const activeSocketSessionId = ref(0);
+const runningActiveFile = ref(false);
+const activeSocketShell = ref("");
+const activeSocketRuntime = ref("");
 const error = ref("");
 const notice = ref("");
 
@@ -133,6 +153,7 @@ let refreshTimerId = null;
 let pingTimerId = null;
 let fitFrameId = null;
 let fitRetryTimerId = null;
+let pendingRunFilePath = "";
 const SESSION_REFRESH_INTERVAL_MS = 45000;
 
 function cancelScheduledFit() {
@@ -170,7 +191,7 @@ function writeSystemLine(message) {
     return;
   }
 
-  term.write(`\r\n[terminal] ${message}\r\n`);
+  term.writeln(`[terminal] ${message}`);
 }
 
 function parseSocketMessage(raw) {
@@ -200,6 +221,170 @@ function sendSocketMessage(payload) {
   }
 }
 
+function quoteShellArg(value) {
+  const text = String(value || "");
+  const escaped = text.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return `"${escaped}"`;
+}
+
+function quotePosixPathFromProjectRoot(relativePath = "") {
+  const rootExpression = "${LIVECODE_TERMINAL_PROJECT_ROOT:-.}";
+  const normalized = String(relativePath || "").replace(/\\/g, "/");
+  const suffix = normalized ? `/${normalized}` : "";
+  const escapedSuffix = suffix
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\$/g, "\\$")
+    .replace(/`/g, "\\`");
+
+  return `"${rootExpression}${escapedSuffix}"`;
+}
+
+function normalizeRelativeProjectPath(pathValue) {
+  const normalized = String(pathValue || "").trim().replace(/\\/g, "/");
+  if (!normalized) {
+    return "";
+  }
+
+  const segments = normalized.split("/").filter(Boolean);
+  if (segments.length === 0) {
+    return "";
+  }
+
+  const safeSegments = [];
+  for (const segment of segments) {
+    if (!segment || segment === "." || segment === "..") {
+      return "";
+    }
+
+    safeSegments.push(segment);
+  }
+
+  return safeSegments.join("/");
+}
+
+function splitFilePath(pathValue) {
+  const normalized = normalizeRelativeProjectPath(pathValue);
+  if (!normalized) {
+    return { directory: "", fileName: "" };
+  }
+
+  const lastSlash = normalized.lastIndexOf("/");
+  if (lastSlash < 0) {
+    return { directory: "", fileName: normalized };
+  }
+
+  return {
+    directory: normalized.slice(0, lastSlash),
+    fileName: normalized.slice(lastSlash + 1),
+  };
+}
+
+function buildRunCommandForPath(pathValue, shellName = "", runtimeName = "") {
+  const { directory, fileName } = splitFilePath(pathValue);
+  if (!fileName) {
+    return { command: "", unsupported: true };
+  }
+
+  const extensionIndex = fileName.lastIndexOf(".");
+  const extension = extensionIndex >= 0 ? fileName.slice(extensionIndex + 1).toLowerCase() : "";
+  if (
+    extension !== "py" &&
+    extension !== "js" &&
+    extension !== "mjs" &&
+    extension !== "cjs" &&
+    extension !== "ts" &&
+    extension !== "tsx" &&
+    extension !== "php" &&
+    extension !== "sh" &&
+    extension !== "go" &&
+    extension !== "html" &&
+    extension !== "htm" &&
+    extension !== "css"
+  ) {
+    return { command: "", unsupported: true };
+  }
+
+  const normalizedShell = String(shellName || "").toLowerCase();
+  const normalizedRuntime = String(runtimeName || "").toLowerCase();
+  const isDockerRuntime = normalizedRuntime === "docker";
+  const isPowerShell = !isDockerRuntime && (normalizedShell.includes("powershell") || normalizedShell.includes("pwsh"));
+  const isCmd = !isDockerRuntime && (normalizedShell === "cmd" || normalizedShell.endsWith("cmd.exe"));
+
+  if (!isPowerShell && !isCmd) {
+    const relativeFilePath = directory ? `${directory}/${fileName}` : fileName;
+    const fileArg = quotePosixPathFromProjectRoot(relativeFilePath);
+    const directoryArg = quotePosixPathFromProjectRoot(directory);
+    let command = "";
+
+    if (extension === "py") {
+      command = `python3 -u ${fileArg}`;
+    } else if (extension === "js" || extension === "mjs" || extension === "cjs") {
+      command = `node ${fileArg}`;
+    } else if (extension === "ts" || extension === "tsx") {
+      command = `npx --yes tsx ${fileArg}`;
+    } else if (extension === "php") {
+      command = `php ${fileArg}`;
+    } else if (extension === "sh") {
+      command = `sh ${fileArg}`;
+    } else if (extension === "go") {
+      command = `go run ${fileArg}`;
+    } else if (extension === "html" || extension === "htm" || extension === "css") {
+      command = `python3 -m http.server 8080 --directory ${directoryArg}`;
+    } else {
+      return { command: "", unsupported: true };
+    }
+
+    return {
+      command: `${command}\n`,
+      unsupported: false,
+    };
+  }
+
+  const fileArg = quoteShellArg(fileName);
+  let command = "";
+  if (extension === "py") {
+    command = `python3 -u ${fileArg}`;
+  } else if (extension === "js" || extension === "mjs" || extension === "cjs") {
+    command = `node ${fileArg}`;
+  } else if (extension === "ts" || extension === "tsx") {
+    command = `npx --yes tsx ${fileArg}`;
+  } else if (extension === "php") {
+    command = `php ${fileArg}`;
+  } else if (extension === "sh") {
+    command = `sh ${fileArg}`;
+  } else if (extension === "go") {
+    command = `go run ${fileArg}`;
+  } else if (extension === "html" || extension === "htm" || extension === "css") {
+    command = "python3 -m http.server 8080";
+  } else {
+    return { command: "", unsupported: true };
+  }
+
+  let prefix = "";
+  if (isPowerShell) {
+    prefix += "if ($env:LIVECODE_TERMINAL_PROJECT_ROOT) { Set-Location $env:LIVECODE_TERMINAL_PROJECT_ROOT };";
+    if (directory) {
+      prefix += ` Set-Location ${quoteShellArg(directory)};`;
+    }
+  } else if (isCmd) {
+    prefix += "if not \"%LIVECODE_TERMINAL_PROJECT_ROOT%\"==\"\" cd /d \"%LIVECODE_TERMINAL_PROJECT_ROOT%\" &";
+    if (directory) {
+      prefix += ` cd /d ${quoteShellArg(directory)} &`;
+    }
+  } else {
+    prefix += "if [ -n \"$LIVECODE_TERMINAL_PROJECT_ROOT\" ]; then cd \"$LIVECODE_TERMINAL_PROJECT_ROOT\"; fi;";
+    if (directory) {
+      prefix += ` cd ${quoteShellArg(directory)};`;
+    }
+  }
+
+  return {
+    command: `${prefix} ${command}\n`,
+    unsupported: false,
+  };
+}
+
 function disconnectSocket(reason = "manual") {
   stopPing();
 
@@ -207,6 +392,8 @@ function disconnectSocket(reason = "manual") {
     connected.value = false;
     connecting.value = false;
     activeSocketSessionId.value = 0;
+    activeSocketShell.value = "";
+    activeSocketRuntime.value = "";
     return;
   }
 
@@ -215,6 +402,8 @@ function disconnectSocket(reason = "manual") {
   connected.value = false;
   connecting.value = false;
   activeSocketSessionId.value = 0;
+  activeSocketShell.value = "";
+  activeSocketRuntime.value = "";
 
   try {
     current.close(1000, String(reason || "manual").slice(0, 80));
@@ -257,7 +446,24 @@ function handleSocketPayload(payload) {
   }
 
   if (type === "ready") {
-    writeSystemLine(t("editor.terminalConnected"));
+    activeSocketShell.value = String(payload.shell || "");
+    activeSocketRuntime.value = String(payload.runtime || "");
+
+    if (pendingRunFilePath) {
+      const queuedPath = pendingRunFilePath;
+      pendingRunFilePath = "";
+      const built = buildRunCommandForPath(
+        queuedPath,
+        activeSocketShell.value,
+        activeSocketRuntime.value
+      );
+      if (!built.unsupported && built.command) {
+        sendSocketMessage({
+          type: "input",
+          data: built.command,
+        });
+      }
+    }
     return;
   }
 
@@ -268,7 +474,6 @@ function handleSocketPayload(payload) {
   }
 
   if (type === "closed") {
-    writeSystemLine(t("editor.terminalClosed"));
     disconnectSocket("remote-close");
     return;
   }
@@ -306,7 +511,6 @@ async function refreshSessions(options = {}) {
 
       if (!activeIsVisible) {
         disconnectSocket("session-closed");
-        writeSystemLine(t("editor.terminalClosed"));
       }
     }
   } catch (requestError) {
@@ -427,7 +631,6 @@ async function connectSelected() {
       connected.value = true;
       connecting.value = false;
       error.value = "";
-      writeSystemLine(t("editor.terminalConnected"));
 
       stopPing();
       pingTimerId = window.setInterval(() => {
@@ -460,12 +663,118 @@ async function connectSelected() {
       connecting.value = false;
       socket = null;
       activeSocketSessionId.value = 0;
+      activeSocketShell.value = "";
+      activeSocketRuntime.value = "";
       stopPing();
-      writeSystemLine(t("editor.terminalDisconnected"));
     };
   } catch (requestError) {
     connecting.value = false;
     error.value = readError(requestError);
+  }
+}
+
+function waitForSocketReady(timeoutMs = 6000) {
+  return new Promise((resolve) => {
+    const startedAt = Date.now();
+    const hasSessionMetadata = () => {
+      return String(activeSocketShell.value || "").trim() !== ""
+        || String(activeSocketRuntime.value || "").trim() !== "";
+    };
+
+    if (connected.value && socket && socket.readyState === WebSocket.OPEN && hasSessionMetadata()) {
+      resolve(true);
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      const elapsed = Date.now() - startedAt;
+      if (connected.value && socket && socket.readyState === WebSocket.OPEN && hasSessionMetadata()) {
+        window.clearInterval(timer);
+        resolve(true);
+        return;
+      }
+
+      if (elapsed >= timeoutMs || (!connecting.value && (!socket || socket.readyState > WebSocket.OPEN))) {
+        window.clearInterval(timer);
+        resolve(false);
+      }
+    }, 60);
+  });
+}
+
+async function ensureConnectedForRun() {
+  const selectedId = Number(selectedSessionId.value || 0);
+  if (connected.value && activeSocketSessionId.value === selectedId) {
+    return true;
+  }
+
+  await connectSelected();
+  const ready = await waitForSocketReady();
+  return ready && activeSocketSessionId.value === Number(selectedSessionId.value || 0);
+}
+
+async function runActiveFile() {
+  const filePath = String(props.activeFilePath || "").trim();
+  if (!filePath) {
+    error.value = t("editor.terminalRunNoActiveFile");
+    return;
+  }
+  const build = buildRunCommandForPath(
+    filePath,
+    activeSocketShell.value,
+    activeSocketRuntime.value
+  );
+  if (build.unsupported || !build.command) {
+    error.value = t("editor.terminalRunUnsupportedFile", { path: filePath });
+    return;
+  }
+
+  runningActiveFile.value = true;
+  error.value = "";
+
+  try {
+    if (typeof props.beforeRunActiveFile === "function") {
+      const saveResult = await props.beforeRunActiveFile();
+      if (saveResult === false) {
+        throw new Error(t("editor.terminalRunSaveFailed"));
+      }
+    }
+
+    if (!selectedSession.value) {
+      await createSession();
+    }
+
+    if (!selectedSession.value) {
+      throw new Error(t("editor.terminalNoSessions"));
+    }
+
+    if (connected.value && activeSocketSessionId.value === Number(selectedSessionId.value || 0)) {
+      const activeBuild = buildRunCommandForPath(
+        filePath,
+        activeSocketShell.value,
+        activeSocketRuntime.value
+      );
+      if (activeBuild.unsupported || !activeBuild.command) {
+        throw new Error(t("editor.terminalRunUnsupportedFile", { path: filePath }));
+      }
+
+      sendSocketMessage({
+        type: "input",
+        data: activeBuild.command,
+      });
+      return;
+    }
+
+    pendingRunFilePath = filePath;
+    const attached = await ensureConnectedForRun();
+    if (!attached) {
+      throw new Error(t("editor.terminalConnectionError"));
+    }
+  } catch (runError) {
+    pendingRunFilePath = "";
+    error.value = readError(runError);
+  } finally {
+    runningActiveFile.value = false;
   }
 }
 
@@ -553,7 +862,6 @@ function initializeTerminal() {
   });
 
   dataDisposable = term.onData(onTerminalInput);
-  writeSystemLine(t("editor.terminalNotConnected"));
 
   terminalHost.value.addEventListener("dragover", preventTerminalDrop);
   terminalHost.value.addEventListener("drop", preventTerminalDrop);

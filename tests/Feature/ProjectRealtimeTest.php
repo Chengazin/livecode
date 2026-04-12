@@ -48,6 +48,7 @@ class ProjectRealtimeTest extends TestCase
             ->assertOk()
             ->assertJsonPath('status', 'ok')
             ->assertJsonPath('revision', 1)
+            ->assertJsonPath('operation.client_id', 'u'.$collaborator->user_id.':client-a')
             ->assertJsonPath('operation.operation.insert_text', ' world');
 
         $nextState = $this->withToken($token)->postJson('/api/projects/'.$project->project_id.'/realtime/editor-state', [
@@ -173,6 +174,90 @@ class ProjectRealtimeTest extends TestCase
         $this->assertCount(2, $messages);
         $this->assertSame('hello team', (string) $messages[0]['message']);
         $this->assertSame('second message', (string) $messages[1]['message']);
+    }
+
+    public function test_chat_message_author_can_edit_and_delete_message(): void
+    {
+        $owner = $this->createUser('realtime-owner-chat-edit@example.com');
+        $collaborator = $this->createUser('realtime-collaborator-chat-edit@example.com');
+        $project = $this->createProject($owner, 'Realtime chat edit');
+        $this->addParticipant($project, $collaborator);
+
+        $token = $collaborator->createToken('test')->plainTextToken;
+
+        $create = $this->withToken($token)->postJson('/api/projects/'.$project->project_id.'/realtime/chat', [
+            'message' => 'draft',
+        ]);
+
+        $create->assertStatus(201);
+        $messageId = (int) $create->json('message.id');
+
+        $update = $this->withToken($token)->patchJson('/api/projects/'.$project->project_id.'/realtime/chat/'.$messageId, [
+            'message' => 'final version',
+        ]);
+
+        $update
+            ->assertOk()
+            ->assertJsonPath('message.id', $messageId)
+            ->assertJsonPath('message.message', 'final version');
+
+        $this->assertNotNull($update->json('message.updated_at'));
+
+        $this->withToken($token)
+            ->deleteJson('/api/projects/'.$project->project_id.'/realtime/chat/'.$messageId)
+            ->assertOk()
+            ->assertJsonPath('message_id', $messageId);
+
+        $chat = $this->withToken($token)
+            ->getJson('/api/projects/'.$project->project_id.'/realtime/chat');
+
+        $chat->assertOk();
+        $this->assertCount(0, $chat->json('messages'));
+    }
+
+    public function test_chat_message_can_be_edited_or_deleted_only_by_author(): void
+    {
+        $owner = $this->createUser('realtime-owner-chat-lock@example.com');
+        $author = $this->createUser('realtime-author-chat-lock@example.com');
+        $other = $this->createUser('realtime-other-chat-lock@example.com');
+        $project = $this->createProject($owner, 'Realtime chat lock');
+        $this->addParticipant($project, $author);
+        $this->addParticipant($project, $other);
+
+        $authorToken = $author->createToken('author')->plainTextToken;
+        $otherToken = $other->createToken('other')->plainTextToken;
+
+        $create = $this->withToken($authorToken)->postJson('/api/projects/'.$project->project_id.'/realtime/chat', [
+            'message' => 'author message',
+        ]);
+        $create->assertStatus(201);
+        $messageId = (int) $create->json('message.id');
+
+        Auth::forgetGuards();
+
+        $this->withToken($otherToken)
+            ->patchJson('/api/projects/'.$project->project_id.'/realtime/chat/'.$messageId, [
+                'message' => 'hijack',
+            ])
+            ->assertStatus(403)
+            ->assertJson(['message' => 'You can edit only your own messages.']);
+
+        Auth::forgetGuards();
+
+        $this->withToken($otherToken)
+            ->deleteJson('/api/projects/'.$project->project_id.'/realtime/chat/'.$messageId)
+            ->assertStatus(403)
+            ->assertJson(['message' => 'You can delete only your own messages.']);
+
+        Auth::forgetGuards();
+
+        $chat = $this->withToken($authorToken)
+            ->getJson('/api/projects/'.$project->project_id.'/realtime/chat');
+
+        $chat->assertOk();
+        $messages = $chat->json('messages');
+        $this->assertCount(1, $messages);
+        $this->assertSame('author message', (string) $messages[0]['message']);
     }
 
     public function test_realtime_endpoints_reject_non_collaborator(): void

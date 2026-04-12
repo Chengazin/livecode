@@ -85,7 +85,65 @@
 
         <label class="field field-row">
           <span>{{ t("profile.email") }}</span>
-          <input :value="profile.email" type="email" disabled />
+          <input v-model.trim="profile.email" type="email" maxlength="255" required />
+        </label>
+
+        <p class="profile-security-hint field-row">
+          {{ t("profile.passwordChangeHint") }}
+        </p>
+
+        <label class="field">
+          <span>{{ t("profile.newPassword") }}</span>
+          <div class="profile-password-input-wrap">
+            <input
+              v-model="profile.newPassword"
+              :type="newPasswordVisible ? 'text' : 'password'"
+              autocomplete="new-password"
+              minlength="8"
+              maxlength="255"
+              class="profile-password-input"
+            />
+            <button
+              class="profile-password-input-toggle"
+              type="button"
+              :aria-label="newPasswordVisible ? t('profile.hidePassword') : t('profile.showPassword')"
+              @click="newPasswordVisible = !newPasswordVisible"
+            >
+              <svg v-if="newPasswordVisible" viewBox="0 0 24 24" class="profile-password-input-icon" aria-hidden="true">
+                <path d="M2 4.2 3.2 3 21 20.8 19.8 22l-3.2-3.2A11.9 11.9 0 0 1 12 20C7 20 2.7 17.1 1 12.9a12.3 12.3 0 0 1 3.8-5L2 4.2Zm4 4 2.4 2.4A4 4 0 0 0 12 16a4 4 0 0 0 2.4-.8l1.8 1.8A9.9 9.9 0 0 1 12 18c-4 0-7.5-2.2-9.1-5.6A10.5 10.5 0 0 1 6 8.2Zm6-4.2c5 0 9.3 2.9 11 7.1a12.1 12.1 0 0 1-4.7 5.6l-1.4-1.4A10 10 0 0 0 21.1 12c-1.6-3.4-5.1-5.6-9.1-5.6-1.4 0-2.7.3-4 .8L6.4 5.6A11.7 11.7 0 0 1 12 4Zm0 4a4 4 0 0 1 4 4c0 .9-.3 1.8-.8 2.4l-5.6-5.6c.6-.5 1.5-.8 2.4-.8Z" />
+              </svg>
+              <svg v-else viewBox="0 0 24 24" class="profile-password-input-icon" aria-hidden="true">
+                <path d="M12 5c5 0 9.3 2.9 11 7-1.7 4.1-6 7-11 7S2.7 16.1 1 12C2.7 7.9 7 5 12 5Zm0 2C8 7 4.5 9.2 2.9 12 4.5 14.8 8 17 12 17s7.5-2.2 9.1-5C19.5 9.2 16 7 12 7Zm0 2.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5Z" />
+              </svg>
+            </button>
+          </div>
+        </label>
+
+        <label class="field">
+          <span>{{ t("profile.newPasswordConfirmation") }}</span>
+          <div class="profile-password-input-wrap">
+            <input
+              v-model="profile.newPasswordConfirmation"
+              :type="newPasswordConfirmationVisible ? 'text' : 'password'"
+              autocomplete="new-password"
+              minlength="8"
+              maxlength="255"
+              class="profile-password-input"
+            />
+            <button
+              class="profile-password-input-toggle"
+              type="button"
+              :aria-label="newPasswordConfirmationVisible ? t('profile.hidePassword') : t('profile.showPassword')"
+              @click="newPasswordConfirmationVisible = !newPasswordConfirmationVisible"
+            >
+              <svg v-if="newPasswordConfirmationVisible" viewBox="0 0 24 24" class="profile-password-input-icon" aria-hidden="true">
+                <path d="M2 4.2 3.2 3 21 20.8 19.8 22l-3.2-3.2A11.9 11.9 0 0 1 12 20C7 20 2.7 17.1 1 12.9a12.3 12.3 0 0 1 3.8-5L2 4.2Zm4 4 2.4 2.4A4 4 0 0 0 12 16a4 4 0 0 0 2.4-.8l1.8 1.8A9.9 9.9 0 0 1 12 18c-4 0-7.5-2.2-9.1-5.6A10.5 10.5 0 0 1 6 8.2Zm6-4.2c5 0 9.3 2.9 11 7.1a12.1 12.1 0 0 1-4.7 5.6l-1.4-1.4A10 10 0 0 0 21.1 12c-1.6-3.4-5.1-5.6-9.1-5.6-1.4 0-2.7.3-4 .8L6.4 5.6A11.7 11.7 0 0 1 12 4Zm0 4a4 4 0 0 1 4 4c0 .9-.3 1.8-.8 2.4l-5.6-5.6c.6-.5 1.5-.8 2.4-.8Z" />
+              </svg>
+              <svg v-else viewBox="0 0 24 24" class="profile-password-input-icon" aria-hidden="true">
+                <path d="M12 5c5 0 9.3 2.9 11 7-1.7 4.1-6 7-11 7S2.7 16.1 1 12C2.7 7.9 7 5 12 5Zm0 2C8 7 4.5 9.2 2.9 12 4.5 14.8 8 17 12 17s7.5-2.2 9.1-5C19.5 9.2 16 7 12 7Zm0 2.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5Z" />
+              </svg>
+            </button>
+          </div>
         </label>
 
         <p v-if="notice" class="notice-banner field-row">{{ notice }}</p>
@@ -125,12 +183,16 @@ const profile = reactive({
   avatarPreset: defaultAvatarPreset,
   avatarUrl: "",
   presets: [defaultAvatarPreset],
+  newPassword: "",
+  newPasswordConfirmation: "",
 });
 
 const previewMode = ref("preset");
 const loading = ref(false);
 const saving = ref(false);
 const uploading = ref(false);
+const newPasswordVisible = ref(false);
+const newPasswordConfirmationVisible = ref(false);
 const avatarInput = ref(null);
 const selectedAvatarFilename = ref("");
 const presetPickerRef = ref(null);
@@ -206,6 +268,10 @@ function applyProfile(user) {
   selectedAvatarFilename.value = "";
   presetPickerOpen.value = false;
   avatarPresetDirty.value = false;
+  profile.newPassword = "";
+  profile.newPasswordConfirmation = "";
+  newPasswordVisible.value = false;
+  newPasswordConfirmationVisible.value = false;
 
   setUser(user || null);
 }
@@ -278,13 +344,22 @@ function openAvatarPicker() {
 }
 
 async function saveProfile() {
-  saving.value = true;
   error.value = "";
   notice.value = "";
+
+  const passwordProvided = profile.newPassword.trim() !== "";
+
+  if (passwordProvided && profile.newPassword !== profile.newPasswordConfirmation) {
+    error.value = t("profile.passwordConfirmationMismatch");
+    return;
+  }
+
+  saving.value = true;
 
   try {
     const payload = {
       name: profile.name,
+      email: profile.email,
       language: profile.language,
       theme: profile.theme,
     };
@@ -293,12 +368,23 @@ async function saveProfile() {
       payload.avatar_preset = profile.avatarPreset;
     }
 
+    if (passwordProvided) {
+      payload.new_password = profile.newPassword;
+      payload.new_password_confirmation = profile.newPasswordConfirmation;
+    }
+
     const response = await request({
       method: "PATCH",
       path: "/me/profile",
       auth: true,
       body: payload,
     });
+
+    if (response?.data?.logged_out_all) {
+      clearSession();
+      router.push("/login");
+      return;
+    }
 
     applyProfile(response.data);
     setLocalePreference(languageToLocale(profile.language), true);
