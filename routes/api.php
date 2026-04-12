@@ -21,7 +21,9 @@ use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
 
-Route::post('/auth/register', [AuthController::class, 'register'])->middleware('throttle:auth-register');
+Route::post('/auth/register/initiate', [AuthController::class, 'registerInitiate'])->middleware('throttle:auth-register');
+Route::post('/auth/register/verify', [AuthController::class, 'registerVerify'])->middleware('throttle:auth-register');
+Route::post('/auth/register/resend-code', [AuthController::class, 'registerResendCode'])->middleware('throttle:auth-register');
 Route::post('/auth/login', [AuthController::class, 'login'])->middleware('throttle:auth-login');
 Route::post('/forgejo/oauth/start', [ForgejoAuthController::class, 'start'])->middleware('throttle:oauth-start');
 Route::get('/forgejo/oauth/callback', [ForgejoAuthController::class, 'callback']);

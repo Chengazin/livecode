@@ -1,56 +1,133 @@
 <?php
 namespace App\Http\Controllers;
+use App\Mail\RegistrationVerificationCodeMail;
+use App\Models\RegistrationVerification;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 
 class AuthController extends Controller
 {
     /**
-     * Register a new user with secure password hashing.
+     * Step 1: Initiate user registration with email verification.
      *
      * Passwords are hashed using bcrypt with a configurable number of rounds.
      * Each password hash is automatically salted during the hashing process.
-     * The salt ensures that identical passwords produce different hashes,
-     * making rainbow table attacks infeasible.
      *
      * Security features:
      * - Bcrypt hashing with automatic salt generation
-     * - Configurable rounds (BCRYPT_ROUNDS env variable, default: 12)
-     * - Email uniqueness validation
+     * - Email verification code sent to provided email
+     * - Configurable code expiration (default: 30 minutes)
      * - Rate limiting on registration endpoint
      *
      * @param Request $request
      * @return \Illuminate\Http\JsonResponse
      */
-    public function register(Request $request)
+    public function registerInitiate(Request $request)
     {
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'email', 'max:255', 'unique:users,email'],
             'password' => ['required', 'string', 'min:8', 'max:255'],
             'language' => ['sometimes', 'string', 'in:rus,eng'],
+        ]);
+
+        try {
+            // Delete any existing verification records for this email
+            RegistrationVerification::query()->where('email', $data['email'])->delete();
+
+            // Create verification record
+            $verification = RegistrationVerification::createForRegistration(
+                email: $data['email'],
+                name: $data['name'],
+                passwordHash: Hash::make($data['password']),
+                language: $data['language'] ?? 'rus',
+                expirationMinutes: 30
+            );
+
+            // Send verification code via email
+            Mail::to($data['email'])
+                ->queue(new RegistrationVerificationCodeMail($verification));
+
+            Log::info('Registration initiated - verification code sent', [
+                'email' => $data['email'],
+                'verification_id' => $verification->registration_verification_id,
+            ]);
+
+            return response()->json([
+                'message' => 'Verification code has been sent to your email',
+                'registration_verification_id' => $verification->registration_verification_id,
+                'email' => $data['email'],
+                'expires_in_minutes' => 30,
+            ], 202);
+        } catch (\Exception $e) {
+            Log::error('Registration initiation failed', [
+                'email' => $data['email'] ?? 'unknown',
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to initiate registration. Please try again.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Step 2: Verify email with code and complete registration.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function registerVerify(Request $request)
+    {
+        $data = $request->validate([
+            'registration_verification_id' => ['required', 'integer'],
+            'verification_code' => ['required', 'string', 'size:6'],
             'device_name' => ['sometimes', 'string', 'max:255'],
         ]);
 
         try {
-            // Create user with hashed password
-            // Hash::make() automatically generates a unique salt for each password
-            // and uses bcrypt algorithm as configured in config/hashing.php
+            $verification = RegistrationVerification::query()
+                ->findOrFail($data['registration_verification_id']);
+
+            // Check if verification is valid and code matches
+            if (!$verification->verify($data['verification_code'])) {
+                Log::warning('Invalid verification code attempted', [
+                    'email' => $verification->email,
+                    'attempts' => $verification->attempts,
+                ]);
+
+                if ($verification->attempts >= $verification->max_attempts) {
+                    $verification->delete();
+                    return response()->json([
+                        'message' => 'Too many failed attempts. Please register again.',
+                    ], 429);
+                }
+
+                return response()->json([
+                    'message' => 'Invalid verification code.',
+                    'attempts_remaining' => $verification->max_attempts - $verification->attempts,
+                ], 422);
+            }
+
+            // Create the user account
             $user = User::query()->create([
-                'name' => $data['name'],
-                'email' => $data['email'],
-                'password_hash' => Hash::make($data['password']),
+                'name' => $verification->name,
+                'email' => $verification->email,
+                'password_hash' => $verification->password_hash,
                 'status' => 'active',
-                'language' => $data['language'] ?? 'rus',
+                'language' => $verification->language,
             ]);
+
+            // Delete verification record after successful registration
+            $verification->delete();
 
             // Create API token
             $tokenName = $data['device_name'] ?? 'api';
             $plainTextToken = $user->createToken($tokenName)->plainTextToken;
 
-            // Log successful registration
             Log::info('User registered successfully', [
                 'user_id' => $user->user_id,
                 'email' => $user->email,
@@ -61,14 +138,87 @@ class AuthController extends Controller
                 'access_token' => $plainTextToken,
                 'user' => $this->serializeUser($user),
             ], 201);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            Log::warning('Registration verification failed - invalid ID', [
+                'verification_id' => $data['registration_verification_id'] ?? 'unknown',
+            ]);
+
+            return response()->json([
+                'message' => 'Invalid verification session. Please register again.',
+            ], 404);
         } catch (\Exception $e) {
-            // Log registration failure
-            Log::warning('User registration failed', [
-                'email' => $data['email'] ?? 'unknown',
+            Log::error('Registration verification failed', [
                 'error' => $e->getMessage(),
             ]);
 
-            throw $e;
+            return response()->json([
+                'message' => 'Registration failed. Please try again.',
+            ], 500);
+        }
+    }
+
+    /**
+     * Resend verification code to email.
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function registerResendCode(Request $request)
+    {
+        $data = $request->validate([
+            'registration_verification_id' => ['required', 'integer'],
+        ]);
+
+        try {
+            $verification = RegistrationVerification::query()
+                ->findOrFail($data['registration_verification_id']);
+
+            // Check if already verified
+            if ($verification->verified_at !== null) {
+                return response()->json([
+                    'message' => 'This email has already been verified.',
+                ], 400);
+            }
+
+            // Check if expired
+            if ($verification->isExpired()) {
+                $verification->delete();
+                return response()->json([
+                    'message' => 'Verification code has expired. Please register again.',
+                ], 400);
+            }
+
+            // Generate new code and reset attempts
+            $verification->update([
+                'verification_code' => RegistrationVerification::generateCode(),
+                'attempts' => 0,
+            ]);
+
+            // Send verification code via email
+            Mail::to($verification->email)
+                ->queue(new RegistrationVerificationCodeMail($verification));
+
+            Log::info('Verification code resent', [
+                'email' => $verification->email,
+                'verification_id' => $verification->registration_verification_id,
+            ]);
+
+            return response()->json([
+                'message' => 'Verification code has been resent to your email',
+                'expires_in_minutes' => 30,
+            ]);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'message' => 'Invalid verification session.',
+            ], 404);
+        } catch (\Exception $e) {
+            Log::error('Resend verification code failed', [
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to resend verification code. Please try again.',
+            ], 500);
         }
     }
 
@@ -153,4 +303,5 @@ class AuthController extends Controller
         return $payload;
     }
 }
+
 
