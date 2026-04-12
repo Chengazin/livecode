@@ -1,6 +1,6 @@
 ﻿<template>
-  <p v-if="notice" class="notice-banner">{{ notice }}</p>
-  <p v-if="error" class="error-banner">{{ error }}</p>
+  <p v-if="notice" class="notice-banner" @click.once="emit('dismiss-notice')">{{ notice }}</p>
+  <p v-if="error" class="error-banner" @click.once="emit('dismiss-error')">{{ error }}</p>
 
   <div class="editor-stage">
     <slot name="editor-stage" />
@@ -105,5 +105,7 @@ const emit = defineEmits([
   "start-terminal-dock-pull",
   "start-terminal-dock-resize",
   "close-terminal-dock",
+  "dismiss-notice",
+  "dismiss-error",
 ]);
 </script>

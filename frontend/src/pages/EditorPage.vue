@@ -154,6 +154,8 @@
             @start-terminal-dock-pull="startTerminalDockPull"
             @start-terminal-dock-resize="startTerminalDockResize"
             @close-terminal-dock="closeTerminalDock"
+            @dismiss-notice="dismissNotice"
+            @dismiss-error="dismissError"
           >
             <template #editor-stage>
               <div ref="aceCommentOverlayHost" class="ace-comment-overlay-host">
@@ -181,10 +183,12 @@
                   v-if="aceLineCommentPopover.open"
                   ref="aceLineCommentPopoverRef"
                   class="ace-line-comment-popover"
+                  :class="{ 'closing': aceLineCommentPopover.isClosing }"
                   :style="{
                     top: `${aceLineCommentPopover.top}px`,
                     left: `${aceLineCommentPopover.left}px`,
                   }"
+                  @animationend="handleCommentPopoverAnimationEnd"
                 >
                   <div class="ace-line-comment-popover-head">
                     <strong>{{ t("editor.commentLine", { line: aceLineCommentPopover.line_number }) }}</strong>
@@ -193,7 +197,7 @@
                       type="button"
                       :title="t('editor.closeLineComments')"
                       :aria-label="t('editor.closeLineComments')"
-                      @click.stop="closeAceLineComments"
+                      @click.stop="startCloseAceLineComments"
                     >
                       x
                     </button>
@@ -557,7 +561,9 @@ const projectMeta = ref(null);
 const saving = ref(false);
 
 const notice = ref("");
+const noticeClosing = ref(false);
 const error = ref("");
+const errorClosing = ref(false);
 
 const lastKnownFileUpdatedAt = ref("");
 const liveSyncEnabled = ref(true);
@@ -591,6 +597,7 @@ const aceLineCommentTrigger = reactive({
 });
 const aceLineCommentPopover = reactive({
   open: false,
+  isClosing: false,
   row: 0,
   line_number: 1,
   top: 0,
@@ -1118,9 +1125,22 @@ function hideAceLineCommentTrigger() {
   aceLineCommentTrigger.visible = false;
 }
 
+function startCloseAceLineComments() {
+  // Start closing animation
+  aceLineCommentPopover.isClosing = true;
+}
+
+function handleCommentPopoverAnimationEnd(event) {
+  // Only close when animation ends and we're closing
+  if (aceLineCommentPopover.isClosing && event.target.classList?.contains("ace-line-comment-popover")) {
+    closeAceLineComments();
+  }
+}
+
 function closeAceLineComments() {
   stopAceLineCommentVoiceInput({ discard: true });
   aceLineCommentPopover.open = false;
+  aceLineCommentPopover.isClosing = false;
   aceLineCommentDraft.value = "";
   aceLineCommentSubmitting.value = false;
 }
@@ -3497,6 +3517,16 @@ function downloadFile() {
   window.URL.revokeObjectURL(url);
 }
 
+function dismissNotice() {
+  notice.value = "";
+  noticeClosing.value = false;
+}
+
+function dismissError() {
+  error.value = "";
+  errorClosing.value = false;
+}
+
 watch(selectedProjectId, (value) => {
   if (!value || !isProjectRoute.value || !isAuthenticated.value) {
     projectName.value = "";
@@ -3605,6 +3635,24 @@ watch(
   },
   { immediate: true },
 );
+
+watch(notice, (value) => {
+  if (value) {
+    // Auto-dismiss notice after 4 seconds
+    setTimeout(() => {
+      dismissNotice();
+    }, 4000);
+  }
+});
+
+watch(error, (value) => {
+  if (value) {
+    // Auto-dismiss error after 5 seconds
+    setTimeout(() => {
+      dismissError();
+    }, 5000);
+  }
+});
 
 watch(liveSyncEnabled, (enabled) => {
   if (!enabled) {

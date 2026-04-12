@@ -3449,6 +3449,155 @@ select:focus {
   border-color: #8da5c9;
 }
 
+/* ===== MODAL AND POPUP ANIMATIONS ===== */
+
+@keyframes modalFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes modalFadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes modalContentScale {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(-24px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes modalContentScaleOut {
+  from {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.95) translateY(-24px);
+  }
+}
+
+/* Modal overlay base styles */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: rgba(9, 16, 28, 0.44);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: modalFadeIn 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Closing state for reverse animation */
+.modal-overlay.closing {
+  animation: modalFadeOut 0.20s cubic-bezier(0.7, 0, 0.84, 0) forwards;
+}
+
+/* Modal content animation */
+.modal-overlay > * {
+  animation: modalContentScale 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Closing state for modal content */
+.modal-overlay.closing > * {
+  animation: modalContentScaleOut 0.28s cubic-bezier(0.7, 0, 0.84, 0) forwards;
+}
+
+/* Additional modal dialog styling */
+.card.project-settings-modal {
+  border-radius: 12px;
+  box-shadow: 0 20px 48px rgba(9, 16, 28, 0.24);
+  transform-origin: center;
+}
+
+/* Popover animations */
+@keyframes popoverFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes popoverFadeOut {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+
+/* Comment popover specific animations */
+.ace-line-comment-popover {
+  animation: popoverFadeIn 0.16s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.ace-line-comment-popover.closing {
+  animation: popoverFadeOut 0.12s cubic-bezier(0.7, 0, 0.84, 0) forwards;
+}
+
+/* Notification toast animations */
+@keyframes toastSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes toastSlideOut {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+
+.notice-banner {
+  animation: toastSlideIn 0.24s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.notice-banner.hiding {
+  animation: toastSlideOut 0.20s cubic-bezier(0.7, 0, 0.84, 0) forwards;
+}
+
+/* Dark theme modal adjustments */
+[data-theme="dark"] .modal-overlay {
+  background: rgba(6, 11, 18, 0.56);
+}
+
+[data-theme="dark"] .card.project-settings-modal {
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.44);
+}
+
 [data-theme="dark"] .tree-inline-kind.kind-file::after,
 [data-theme="dark"] .tree-inline-kind.kind-folder::before {
   border-color: #8da5c9;

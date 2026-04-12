@@ -1,9 +1,15 @@
 <template>
-  <div v-if="open" class="modal-overlay" @click.self="emit('close')">
+  <div
+    v-if="open"
+    class="modal-overlay"
+    :class="{ 'closing': isClosing }"
+    @click.self="handleCloseStart"
+    @animationend="handleAnimationEnd"
+  >
     <section class="card project-settings-modal" role="dialog" aria-modal="true" :aria-label="t('editor.projectSettings')">
       <div class="sidebar-head">
         <h2>{{ t("editor.projectSettings") }}</h2>
-        <button class="btn btn-sm btn-ghost" type="button" :disabled="saving || deleting" @click="emit('close')">x</button>
+        <button class="btn btn-sm btn-ghost" type="button" :disabled="saving || deleting" @click="handleCloseStart">x</button>
       </div>
 
       <div class="project-settings-tabs" role="tablist" :aria-label="t('editor.projectSettings')">
@@ -331,6 +337,7 @@ const emit = defineEmits(["close", "save", "delete", "update:stats-period-days",
 const { t } = useI18n();
 
 const activeTab = ref("settings");
+const isClosing = ref(false);
 const testingCode = ref("");
 const analysisResult = ref(null);
 
@@ -491,6 +498,19 @@ function formatShortDate(value) {
   });
 }
 
+function handleCloseStart() {
+  // Start closing animation
+  isClosing.value = true;
+}
+
+function handleAnimationEnd(event) {
+  // Only emit close when the overlay animation ends and we're closing
+  if (isClosing.value && event.target.classList?.contains("modal-overlay")) {
+    isClosing.value = false;
+    emit("close");
+  }
+}
+
 watch(
   () => props.open,
   (isOpen) => {
@@ -498,6 +518,7 @@ watch(
       activeTab.value = "settings";
       resetDeleteFlow();
       analysisResult.value = null;
+      isClosing.value = false;
       return;
     }
 
