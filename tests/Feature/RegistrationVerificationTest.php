@@ -48,7 +48,7 @@ class RegistrationVerificationTest extends TestCase
         $verification = RegistrationVerification::query()
             ->where('email', $payload['email'])
             ->first();
-        
+
         $this->assertNotEquals($payload['password'], $verification->password_hash);
         $this->assertStringStartsWith('$2y$', $verification->password_hash);
     }

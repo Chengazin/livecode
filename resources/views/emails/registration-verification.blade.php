@@ -18,7 +18,7 @@
 
 Если вы не регистрировались, просто проигнорируйте это письмо.
 
-С уважением,  
+С уважением,
 Команда LiveCode
 
 @else
@@ -41,7 +41,7 @@ Enter this code on the registration page to confirm your account.
 
 If you didn't register, please ignore this email.
 
-Best regards,  
+Best regards,
 LiveCode Team
 
 @endif

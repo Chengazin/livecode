@@ -99,7 +99,7 @@ class RegistrationVerification extends Model
      */
     public function isValid(): bool
     {
-        return $this->verified_at === null 
+        return $this->verified_at === null
             && ($this->expires_at === null || $this->expires_at->isFuture())
             && $this->attempts < $this->max_attempts;
     }

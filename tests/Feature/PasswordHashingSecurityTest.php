@@ -15,7 +15,7 @@ class PasswordHashingSecurityTest extends TestCase
     {
         // Create a user with plain password
         $plainPassword = 'secure_password_12345';
-        
+
         $user = User::query()->create([
             'name' => 'Test User',
             'email' => 'test@example.com',
@@ -61,10 +61,10 @@ class PasswordHashingSecurityTest extends TestCase
     public function test_bcrypt_rounds_configuration()
     {
         $config = config('hashing.bcrypt.rounds');
-        
+
         // Verify that bcrypt rounds is configured (minimum 4 for tests, 10+ for production)
         $this->assertGreaterThanOrEqual(4, $config);
-        
+
         // If not in test environment, verify stronger security
         if (config('app.env') !== 'testing') {
             $this->assertGreaterThanOrEqual(12, $config);
@@ -98,14 +98,14 @@ class PasswordHashingSecurityTest extends TestCase
         $response->assertCreated();
 
         $user = User::query()->where('email', $payload['email'])->first();
-        
+
         // Verify user was created with hashed password
         $this->assertNotNull($user);
         $this->assertNotEquals($payload['password'], $user->password_hash);
-        
+
         // Verify password starts with bcrypt prefix
         $this->assertStringStartsWith('$2y$', $user->password_hash);
-        
+
         // Verify the password can be verified
         $this->assertTrue(Hash::check($payload['password'], $user->password_hash));
 

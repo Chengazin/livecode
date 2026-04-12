@@ -24,7 +24,7 @@ return new class extends Migration
             $table->timestamp('verified_at')->nullable();
             $table->timestamp('created_at')->useCurrent();
             $table->timestamp('updated_at')->useCurrent()->useCurrentOnUpdate();
-            
+
             $table->index(['email', 'verification_code']);
         });
     }

@@ -6,6 +6,7 @@ use App\Http\Controllers\AdminProjectParticipantController;
 use App\Http\Controllers\AdminProjectTerminalSessionController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ForgejoAuthController;
+use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\ProjectController;
 use App\Http\Controllers\ProjectForgejoController;
 use App\Http\Controllers\ProjectGitController;
@@ -71,6 +72,15 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('project-invitations/accept', [ProjectInvitationController::class, 'accept'])->middleware('throttle:invitation-accept');
     Route::apiResource('project-participants', ProjectParticipantController::class);
     Route::apiResource('project-invitations', ProjectInvitationController::class);
+
+    // Notifications
+    Route::get('notifications', [NotificationController::class, 'index']);
+    Route::get('notifications/unread-count', [NotificationController::class, 'unreadCount']);
+    Route::patch('notifications/{notificationId}/mark-as-read', [NotificationController::class, 'markAsRead']);
+    Route::patch('notifications/{notificationId}/mark-as-unread', [NotificationController::class, 'markAsUnread']);
+    Route::post('notifications/mark-all-as-read', [NotificationController::class, 'markAllAsRead']);
+    Route::delete('notifications/{notificationId}', [NotificationController::class, 'delete']);
+    Route::delete('notifications', [NotificationController::class, 'deleteAll']);
 });
 Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::apiResource('users', UserController::class);
