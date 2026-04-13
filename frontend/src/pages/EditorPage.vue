@@ -647,6 +647,8 @@ let chatVoiceAbortRequested = false;
 let aceLineCommentVoiceAbortRequested = false;
 let chatVoiceBaseDraft = "";
 let aceLineCommentVoiceBaseDraft = "";
+// let chatVoiceAudioChunks = [];  // unused - only used in commented functions
+// let aceLineCommentVoiceAudioChunks = [];  // unused - only used in commented functions
 let applyingRemoteEditorChange = false;
 let remoteMarkerStyleInjected = false;
 const remoteMarkers = new Map();
@@ -2345,6 +2347,220 @@ function startAceLineCommentVoiceRecognitionInput() {
     return false;
   }
 }
+
+// MediaRecorder fallback for HTTP contexts and browsers without Web Speech API
+// Unused: This function is not currently integrated into the UI
+/* Unused: This function is not currently integrated into the UI
+async function startChatVoiceRecorderInput() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+      ? "audio/webm;codecs=opus"
+      : "audio/wav";
+
+    const recorder = new MediaRecorder(stream, { mimeType });
+    chatVoiceAudioChunks = [];
+
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        chatVoiceAudioChunks.push(event.data);
+      }
+    };
+
+    recorder.onstart = () => {
+      chatVoiceListening.value = true;
+      error.value = "";
+    };
+
+    recorder.onstop = async () => {
+      chatVoiceListening.value = false;
+      const audioBlob = new Blob(chatVoiceAudioChunks, { type: mimeType });
+      chatVoiceAudioChunks = [];
+
+      if (audioBlob.size === 0) {
+        error.value = t("editor.chatVoiceNoSpeech");
+        return;
+      }
+
+      await transcribeAndApplyChatVoice(audioBlob);
+
+      for (const track of stream.getTracks()) {
+        track.stop();
+      }
+    };
+
+    recorder.onerror = (event) => {
+      chatVoiceListening.value = false;
+      error.value = mapSpeechRecognitionErrorCode(event.error || "audio-capture");
+      chatVoiceAudioChunks = [];
+
+      for (const track of stream.getTracks()) {
+        track.stop();
+      }
+    };
+
+    recorder.start();
+    return true;
+  } catch (err) {
+    const errorName = String(err?.name || "audio-capture").toLowerCase();
+    error.value = errorName === "notallowederror"
+      ? t("editor.chatVoicePermissionDenied")
+      : mapSpeechRecognitionErrorCode("audio-capture");
+    chatVoiceAudioChunks = [];
+    return false;
+  }
+}
+*/
+
+/* Unused: These functions are only called from commented functions above
+async function transcribeAndApplyChatVoice(audioBlob) {
+  if (!selectedProjectId.value) {
+    error.value = t("common.requestFailed");
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("audio", audioBlob, "audio.webm");
+  formData.append("language", resolveSpeechRecognitionLanguage());
+
+  try {
+    const response = await fetch(
+      `/api/projects/${selectedProjectId.value}/speech/transcribe`,
+      {
+        method: "POST",
+        body: formData,
+        headers: {
+          "Authorization": `Bearer ${getAccessToken()}`,
+        },
+      }
+    );
+
+    if (!response.ok) {
+      error.value = t("editor.chatVoiceTranscriptionFailed");
+      return;
+    }
+
+    const data = await response.json();
+    const transcript = String(data.transcript || "").trim();
+
+    if (!transcript) {
+      error.value = t("editor.chatVoiceNoSpeech");
+      return;
+    }
+
+    applyChatVoiceTranscript(transcript, chatVoiceBaseDraft);
+  } catch (err) {
+    error.value = t("editor.chatVoiceNetworkError");
+  }
+}
+
+/* Unused: This function is not currently integrated into the UI
+async function startAceLineCommentVoiceRecorderInput() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+      ? "audio/webm;codecs=opus"
+      : "audio/wav";
+
+    const recorder = new MediaRecorder(stream, { mimeType });
+    aceLineCommentVoiceAudioChunks = [];
+
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        aceLineCommentVoiceAudioChunks.push(event.data);
+      }
+    };
+
+    recorder.onstart = () => {
+      aceLineCommentVoiceListening.value = true;
+      error.value = "";
+    };
+
+    recorder.onstop = async () => {
+      aceLineCommentVoiceListening.value = false;
+      const audioBlob = new Blob(aceLineCommentVoiceAudioChunks, { type: mimeType });
+      aceLineCommentVoiceMediaRecorder = null;
+      aceLineCommentVoiceAudioChunks = [];
+
+      if (audioBlob.size === 0) {
+        error.value = t("editor.chatVoiceNoSpeech");
+        return;
+      }
+
+      // Send audio to server for transcription
+      await transcribeAndApplyAceLineCommentVoice(audioBlob);
+
+      // Stop audio stream
+      for (const track of stream.getTracks()) {
+        track.stop();
+      }
+    };
+
+    recorder.onerror = (event) => {
+      aceLineCommentVoiceListening.value = false;
+      error.value = mapSpeechRecognitionErrorCode(event.error || "audio-capture");
+      aceLineCommentVoiceAudioChunks = [];
+
+      for (const track of stream.getTracks()) {
+        track.stop();
+      }
+    };
+
+    recorder.start();
+    return true;
+  } catch (err) {
+    const errorName = String(err?.name || "audio-capture").toLowerCase();
+    error.value = errorName === "notallowederror"
+      ? t("editor.chatVoicePermissionDenied")
+      : mapSpeechRecognitionErrorCode("audio-capture");
+    aceLineCommentVoiceAudioChunks = [];
+    return false;
+  }
+}
+*/
+
+/* continuing comments...
+async function transcribeAndApplyAceLineCommentVoice(audioBlob) {
+  if (!selectedProjectId.value) {
+    error.value = t("common.requestFailed");
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("audio", audioBlob, "audio.webm");
+  formData.append("language", resolveSpeechRecognitionLanguage());
+
+  try {
+    const response = await fetch(
+      `/api/projects/${selectedProjectId.value}/speech/transcribe`,
+      {
+        method: "POST",
+        body: formData,
+        headers: {
+          "Authorization": `Bearer ${getAccessToken()}`,
+        },
+      }
+    );
+
+    if (!response.ok) {
+      error.value = t("editor.chatVoiceTranscriptionFailed");
+      return;
+    }
+
+    const data = await response.json();
+    const transcript = String(data.transcript || "").trim();
+
+    if (!transcript) {
+      error.value = t("editor.chatVoiceNoSpeech");
+      return;
+    }
+
+    applyAceLineCommentVoiceTranscript(transcript, aceLineCommentVoiceBaseDraft);
+  } catch (err) {
+    error.value = t("editor.chatVoiceNetworkError");
+  }
+}
+*/
 
 async function startChatVoiceInput() {
   if (chatVoiceListening.value) {

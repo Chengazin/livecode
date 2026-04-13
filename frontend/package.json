@@ -43,6 +43,7 @@
     },
     "rules": {}
   },
+"env": { "vue/setup-compiler-macros": true },
   "browserslist": [
     "> 1%",
     "last 2 versions",
