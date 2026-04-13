@@ -24,8 +24,9 @@
           class="btn btn-sm btn-primary"
           type="button"
           @click="showNewTaskForm = true"
+          title="Add new task"
         >
-          +
+          {{ t("common.add", "Add Task") }} +
         </button>
         <button
           class="btn btn-sm btn-ghost"

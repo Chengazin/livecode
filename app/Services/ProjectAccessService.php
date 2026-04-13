@@ -106,6 +106,15 @@ class ProjectAccessService
         ]);
     }
 
+    public function canManageTasks(Project $project, User $user): bool
+    {
+        return $this->hasProjectRole($project, $user, [
+            self::ROLE_OWNER,
+            ProjectParticipant::ROLE_MAINTAINER,
+            ProjectParticipant::ROLE_DEVELOPER,
+        ]);
+    }
+
     /**
      * @param list<string> $allowedRoles
      */
