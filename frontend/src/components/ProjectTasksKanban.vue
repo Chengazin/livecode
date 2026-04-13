@@ -187,7 +187,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref,computed, onMounted,defineProps } from 'vue';
 import { useI18n } from 'vue-i18n';
 import {
   getTasks,
@@ -483,7 +483,7 @@ onMounted(() => {
 }
 
 .kanban-task-card {
-  background: white;
+  background: var(--color-background-tertiary);
   border: 1px solid var(--color-border);
   border-radius: 0.5rem;
   padding: 0.75rem;
@@ -607,7 +607,7 @@ onMounted(() => {
 }
 
 .project-task-item {
-  background: white;
+  background: var(--color-background-tertiary);
   border: 1px solid var(--color-border);
   border-radius: 0.5rem;
   padding: 1rem;
