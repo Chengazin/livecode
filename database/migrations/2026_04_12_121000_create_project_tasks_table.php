@@ -18,7 +18,7 @@ return new class extends Migration
             $table->unsignedBigInteger('assigned_to_user_id')->nullable();  // Task assignee
             $table->string('title', 255);
             $table->text('description')->nullable();
-            $table->enum('status', ['open', 'assigned', 'in_progress', 'completed', 'closed'])->default('open');
+            $table->enum('status', ['backlog', 'in_progress', 'done'])->default('backlog');
             $table->integer('priority')->default(0);  // 0 = low, 1 = medium, 2 = high, 3 = urgent
             $table->date('due_date')->nullable();
             $table->timestamp('assigned_at')->nullable();
