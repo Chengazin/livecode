@@ -199,7 +199,7 @@
         </div>
       </section>
 
-      <ProjectTasksPanel :project-id="projectId" :permissions="permissions" />
+      <ProjectTasksKanban :project-id="projectId" :permissions="permissions" />
 
       <section class="card project-info-card">
         <h2>{{ t("projectInfo.historyTitle") }}</h2>
@@ -469,7 +469,7 @@ import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { request } from "../services/api";
 import { getSession } from "../services/auth";
-import ProjectTasksPanel from "../components/ProjectTasksPanel.vue";
+import ProjectTasksKanban from "../components/ProjectTasksKanban.vue";
 
 const route = useRoute();
 const router = useRouter();
