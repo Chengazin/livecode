@@ -104,12 +104,12 @@ export async function completeTask(projectId, taskId) {
 }
 
 /**
- * Close a task
+ * Close a task (reopen from Done back to Backlog)
  */
-export async function closeTask(projectId, taskId) {
+export async function reopenTask(projectId, taskId) {
   return request({
     method: 'POST',
-    path: `/api/projects/${projectId}/tasks/${taskId}/close`,
+    path: `/api/projects/${projectId}/tasks/${taskId}/reopen`,
   });
 }
 
@@ -144,23 +144,19 @@ export const PRIORITY_LABELS = {
 };
 
 /**
- * Status labels
+ * Status labels - Simplified workflow
  */
 export const STATUS_LABELS = {
-  open: 'Open',
-  assigned: 'Assigned',
+  backlog: 'Backlog',
   in_progress: 'In Progress',
-  completed: 'Completed',
-  closed: 'Closed',
+  done: 'Done',
 };
 
 /**
- * Status colors
+ * Status colors - Simplified workflow
  */
 export const STATUS_COLORS = {
-  open: '#gray',
-  assigned: '#blue',
-  in_progress: '#yellow',
-  completed: '#green',
-  closed: '#red',
+  backlog: '#808080',
+  in_progress: '#FFD700',
+  done: '#4CAF50',
 };

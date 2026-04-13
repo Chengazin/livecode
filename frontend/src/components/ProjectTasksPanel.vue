@@ -96,13 +96,13 @@
           </div>
           <div class="project-task-actions">
             <button
-              v-if="task.status === 'open' || task.status === 'assigned'"
+              v-if="task.status === 'backlog'"
               class="btn btn-sm btn-ghost"
               type="button"
               :disabled="taskActionBusy"
               @click="startTaskAction(task)"
             >
-              Start
+              Take Task
             </button>
             <button
               v-if="task.status === 'in_progress'"
@@ -114,13 +114,13 @@
               Complete
             </button>
             <button
-              v-if="task.status !== 'closed'"
+              v-if="task.status === 'done'"
               class="btn btn-sm btn-ghost"
               type="button"
               :disabled="taskActionBusy"
-              @click="closeTaskAction(task)"
+              @click="reopenTaskAction(task)"
             >
-              Close
+              Reopen
             </button>
             <button
               class="btn btn-sm btn-ghost"
@@ -166,7 +166,7 @@ import {
   createTask,
   startTask,
   completeTask,
-  closeTask,
+  reopenTask,
   deleteTask,
   PRIORITY_LABELS,
   STATUS_LABELS,
@@ -303,12 +303,12 @@ const completeTaskAction = async (task) => {
   }
 };
 
-const closeTaskAction = async (task) => {
+const reopenTaskAction = async (task) => {
   taskActionBusy.value = true;
   taskError.value = '';
 
   try {
-    const response = await closeTask(props.projectId, task.project_task_id);
+    const response = await reopenTask(props.projectId, task.project_task_id);
     if (response?.data?.data) {
       const index = tasks.value.findIndex(t => t.project_task_id === task.project_task_id);
       if (index !== -1) {
@@ -316,8 +316,8 @@ const closeTaskAction = async (task) => {
       }
     }
   } catch (error) {
-    taskError.value = error?.message || 'Failed to close task';
-    console.error('Failed to close task:', error);
+    taskError.value = error?.message || 'Failed to reopen task';
+    console.error('Failed to reopen task:', error);
   } finally {
     taskActionBusy.value = false;
   }

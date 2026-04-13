@@ -37,12 +37,11 @@ class ProjectTask extends Model
 
     /**
      * Task status enumeration
+     * Simplified workflow: Backlog → In Progress → Done
      */
-    public const STATUS_OPEN = 'open';
-    public const STATUS_ASSIGNED = 'assigned';
+    public const STATUS_BACKLOG = 'backlog';
     public const STATUS_IN_PROGRESS = 'in_progress';
-    public const STATUS_COMPLETED = 'completed';
-    public const STATUS_CLOSED = 'closed';
+    public const STATUS_DONE = 'done';
 
     /**
      * Task priority enumeration
@@ -78,18 +77,24 @@ class ProjectTask extends Model
 
     /**
      * Assign task to a user
+     * Auto-transitions from Backlog to In Progress when assigned
      */
     public function assignTo(int $userId): void
     {
         $this->update([
             'assigned_to_user_id' => $userId,
-            'status' => self::STATUS_ASSIGNED,
             'assigned_at' => now(),
         ]);
+
+        // Only move to In Progress if task is in Backlog
+        if ($this->status === self::STATUS_BACKLOG && $this->assigned_to_user_id === $userId) {
+            $this->update(['status' => self::STATUS_IN_PROGRESS]);
+        }
     }
 
     /**
-     * Start working on the task
+     * Start work on a task (move from Backlog to In Progress)
+     * Requires an assignee
      */
     public function startWork(): void
     {
@@ -102,34 +107,35 @@ class ProjectTask extends Model
     }
 
     /**
-     * Complete the task
+     * Mark task as done
      */
-    public function complete(): void
+    public function markDone(): void
     {
         $this->update([
-            'status' => self::STATUS_COMPLETED,
+            'status' => self::STATUS_DONE,
             'completed_at' => now(),
         ]);
     }
 
     /**
-     * Close the task
+     * Reopen task back to Backlog
      */
-    public function close(): void
+    public function reopen(): void
     {
         $this->update([
-            'status' => self::STATUS_CLOSED,
+            'status' => self::STATUS_BACKLOG,
+            'completed_at' => null,
         ]);
     }
 
     /**
-     * Unassign the task
+     * Unassign a task (return to Backlog)
      */
     public function unassign(): void
     {
         $this->update([
             'assigned_to_user_id' => null,
-            'status' => self::STATUS_OPEN,
+            'status' => self::STATUS_BACKLOG,
             'assigned_at' => null,
         ]);
     }
@@ -143,20 +149,19 @@ class ProjectTask extends Model
     }
 
     /**
-     * Scope to get open tasks
+     * Scope to get backlog tasks
      */
-    public function scopeOpen($query)
+    public function scopeBacklog($query)
     {
-        return $query->where('status', self::STATUS_OPEN);
+        return $query->where('status', self::STATUS_BACKLOG);
     }
 
     /**
-     * Scope to get assigned tasks
+     * Scope to get active (in progress) tasks
      */
-    public function scopeAssigned($query)
+    public function scopeActive($query)
     {
-        return $query->where('status', '!=', self::STATUS_OPEN)
-            ->where('assigned_to_user_id', '!=', null);
+        return $query->where('status', self::STATUS_IN_PROGRESS);
     }
 
     /**
@@ -173,7 +178,6 @@ class ProjectTask extends Model
     public function scopeOverdue($query)
     {
         return $query->whereDate('due_date', '<', now())
-            ->where('status', '!=', self::STATUS_COMPLETED)
-            ->where('status', '!=', self::STATUS_CLOSED);
+            ->where('status', '!=', self::STATUS_DONE);
     }
 }

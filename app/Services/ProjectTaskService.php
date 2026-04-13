@@ -10,6 +10,9 @@ use Illuminate\Support\Facades\Log;
 
 class ProjectTaskService
 {
+    // WIP Limit configuration
+    private const WIP_LIMIT = 3;
+
     /**
      * Create a new task
      */
@@ -28,7 +31,7 @@ class ProjectTaskService
             'description' => $description,
             'priority' => $priority,
             'due_date' => $dueDate,
-            'status' => ProjectTask::STATUS_OPEN,
+            'status' => ProjectTask::STATUS_BACKLOG,
         ]);
 
         Log::info('Project task created', [
@@ -63,10 +66,23 @@ class ProjectTaskService
 
     /**
      * Assign task to a user
+     * If task is in Backlog and has no assignee, moves it to In Progress
      */
     public static function assignTaskToUser(ProjectTask $task, int $userId): ProjectTask
     {
         $task->assignTo($userId);
+
+        // If moving to In Progress, check WIP limit
+        if ($task->status === ProjectTask::STATUS_IN_PROGRESS) {
+            if (!self::canStartNewTask($task->project_id, $userId)) {
+                // Revert back to Backlog with assignee
+                $task->update(['status' => ProjectTask::STATUS_BACKLOG]);
+                throw new \Exception(sprintf(
+                    'User has reached WIP limit (%d active tasks).',
+                    self::WIP_LIMIT
+                ));
+            }
+        }
 
         // Notify the assigned user
         NotificationService::sendNotification(
@@ -90,38 +106,38 @@ class ProjectTaskService
     }
 
     /**
-     * Start working on a task
+     * Start working on a task (move from Backlog to In Progress)
+     * Respects WIP Limit and requires active assignment
      */
     public static function startTask(ProjectTask $task): ProjectTask
     {
-        $task->startWork();
+        // Check WIP limit for assigned user
+        if ($task->assigned_to_user_id) {
+            $canStart = self::canStartNewTask($task->project_id, $task->assigned_to_user_id);
+            if (!$canStart) {
+                throw new \Exception(sprintf(
+                    'User has reached WIP limit (%d active tasks). Cannot start more tasks.',
+                    self::WIP_LIMIT
+                ));
+            }
+        }
 
-        // Notify task creator
-        NotificationService::sendNotification(
-            userId: $task->created_by_user_id,
-            type: 'task_started',
-            title: 'Task In Progress',
-            message: sprintf('Task "%s" has been started', $task->title),
-            data: [
-                'project_id' => $task->project_id,
-                'project_task_id' => $task->project_task_id,
-            ]
-        );
+        $task->startWork();
 
         Log::info('Project task started', [
             'project_task_id' => $task->project_task_id,
-            'started_by' => $task->assigned_to_user_id,
+            'assigned_to' => $task->assigned_to_user_id,
         ]);
 
         return $task;
     }
 
     /**
-     * Complete a task
+     * Mark task as done
      */
     public static function completeTask(ProjectTask $task): ProjectTask
     {
-        $task->complete();
+        $task->markDone();
 
         // Notify task creator
         NotificationService::sendNotification(
@@ -144,14 +160,28 @@ class ProjectTaskService
     }
 
     /**
-     * Close a task
+     * Reopen a completed task (return to Backlog)
      */
-    public static function closeTask(ProjectTask $task): ProjectTask
+    public static function reopenTask(ProjectTask $task): ProjectTask
     {
-        $task->close();
-        Log::info('Project task closed', [
+        $task->reopen();
+
+        // Notify task creator that task was reopened
+        NotificationService::sendNotification(
+            userId: $task->created_by_user_id,
+            type: 'task_reopened',
+            title: 'Task Reopened',
+            message: sprintf('Task "%s" has been reopened', $task->title),
+            data: [
+                'project_id' => $task->project_id,
+                'project_task_id' => $task->project_task_id,
+            ]
+        );
+
+        Log::info('Project task reopened', [
             'project_task_id' => $task->project_task_id,
         ]);
+
         return $task;
     }
 
@@ -262,9 +292,35 @@ class ProjectTaskService
             ->forProject($projectId)
             ->assignedTo($userId)
             ->with(['createdBy', 'project'])
-            ->orderByDesc('priority')
-            ->orderByRaw('COALESCE(due_date, created_at) ASC')
             ->get();
+    }
+
+    /**
+     * Get active (in progress) task count for a user in a project
+     */
+    public static function getActiveTasksCount(int $projectId, int $userId): int
+    {
+        return ProjectTask::query()
+            ->forProject($projectId)
+            ->active()
+            ->assignedTo($userId)
+            ->count();
+    }
+
+    /**
+     * Check if user can start a new task (respects WIP Limit)
+     */
+    public static function canStartNewTask(int $projectId, int $userId): bool
+    {
+        return self::getActiveTasksCount($projectId, $userId) < self::WIP_LIMIT;
+    }
+
+    /**
+     * Get remaining WIP slots for a user
+     */
+    public static function getWipSlots(int $projectId, int $userId): int
+    {
+        return max(0, self::WIP_LIMIT - self::getActiveTasksCount($projectId, $userId));
     }
 
     /**
@@ -274,11 +330,10 @@ class ProjectTaskService
     {
         return [
             'total' => ProjectTask::forProject($projectId)->count(),
-            'open' => ProjectTask::forProject($projectId)->where('status', ProjectTask::STATUS_OPEN)->count(),
-            'assigned' => ProjectTask::forProject($projectId)->where('status', ProjectTask::STATUS_ASSIGNED)->count(),
+            'backlog' => ProjectTask::forProject($projectId)->where('status', ProjectTask::STATUS_BACKLOG)->count(),
             'in_progress' => ProjectTask::forProject($projectId)->where('status', ProjectTask::STATUS_IN_PROGRESS)->count(),
-            'completed' => ProjectTask::forProject($projectId)->where('status', ProjectTask::STATUS_COMPLETED)->count(),
-            'closed' => ProjectTask::forProject($projectId)->where('status', ProjectTask::STATUS_CLOSED)->count(),
+            'done' => ProjectTask::forProject($projectId)->where('status', ProjectTask::STATUS_DONE)->count(),
+            'unassigned' => ProjectTask::forProject($projectId)->whereNull('assigned_to_user_id')->count(),
             'overdue' => ProjectTask::forProject($projectId)->overdue()->count(),
         ];
     }
