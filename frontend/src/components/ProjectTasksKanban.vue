@@ -20,6 +20,14 @@
           </button>
         </div>
         <button
+          v-if="canCreateTasks"
+          class="btn btn-sm btn-primary"
+          type="button"
+          @click="showNewTaskForm = true"
+        >
+          +
+        </button>
+        <button
           class="btn btn-sm btn-ghost"
           type="button"
           :disabled="taskLoading"
@@ -31,6 +39,52 @@
     </div>
 
     <p v-if="taskError" class="error-banner">{{ taskError }}</p>
+
+    <!-- New Task Form -->
+    <form v-if="showNewTaskForm && canCreateTasks" class="form-grid compact-form" @submit.prevent="createNewTask">
+      <label class="field">
+        <span>{{ t("projectInfo.taskTitle", "Task Title") }}</span>
+        <input
+          v-model.trim="newTaskForm.title"
+          type="text"
+          maxlength="255"
+          required
+          placeholder="Enter task title"
+        />
+      </label>
+      <label class="field">
+        <span>{{ t("projectInfo.taskDescription", "Description") }}</span>
+        <textarea
+          v-model.trim="newTaskForm.description"
+          rows="2"
+          maxlength="2000"
+          placeholder="Enter task description (optional)"
+        />
+      </label>
+      <div class="form-row">
+        <label class="field field-row">
+          <span>{{ t("projectInfo.taskPriority", "Priority") }}</span>
+          <select v-model.number="newTaskForm.priority">
+            <option :value="0">Low</option>
+            <option :value="1" selected>Medium</option>
+            <option :value="2">High</option>
+            <option :value="3">Urgent</option>
+          </select>
+        </label>
+        <label class="field field-row">
+          <span>{{ t("projectInfo.taskDueDate", "Due Date") }}</span>
+          <input v-model="newTaskForm.due_date" type="date" />
+        </label>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit" :disabled="newTaskBusy">
+          {{ newTaskBusy ? t("common.creating") : t("common.create") }}
+        </button>
+        <button class="btn btn-ghost" type="button" @click="showNewTaskForm = false">
+          {{ t("common.cancel") }}
+        </button>
+      </div>
+    </form>
 
     <!-- Kanban View -->
     <div v-if="viewMode === 'kanban'" class="kanban-board-container">
@@ -187,11 +241,10 @@
 </template>
 
 <script setup>
-import { ref,computed, onMounted,defineProps } from 'vue';
+import { ref, computed, onMounted, defineProps } from 'vue';
 import { useI18n } from 'vue-i18n';
 import {
-  getTasks,
-  startTask,
+  getTasks,  createTask,  startTask,
   completeTask,
   reopenTask,
   deleteTask,
@@ -219,10 +272,22 @@ const tasks = ref([]);
 const taskLoading = ref(false);
 const taskError = ref('');
 const taskActionBusy = ref(false);
+const newTaskBusy = ref(false);
 const viewMode = ref('kanban'); // 'kanban' or 'list'
 const statuses = ['backlog', 'in_progress', 'done'];
 const draggedTask = ref(null);
 const dragOverColumn = ref(null);
+const showNewTaskForm = ref(false);
+const newTaskForm = ref({
+  title: '',
+  description: '',
+  priority: 1,
+  due_date: '',
+});
+
+const canCreateTasks = computed(() => {
+  return props.permissions.can_manage_tasks || props.permissions.effective_role === 'admin' || props.permissions.effective_role === 'manager';
+});
 
 const formatDate = (date) => {
   if (!date) return '';
@@ -383,6 +448,36 @@ const deleteTaskAction = async (task) => {
 const editTask = (task) => {
   console.log('Edit task:', task);
   // TODO: Implementation for editing tasks
+};
+
+const createNewTask = async () => {
+  newTaskBusy.value = true;
+  taskError.value = '';
+
+  try {
+    const response = await createTask(props.projectId, {
+      title: newTaskForm.value.title,
+      description: newTaskForm.value.description || null,
+      priority: newTaskForm.value.priority,
+      due_date: newTaskForm.value.due_date || null,
+    });
+
+    if (response?.data?.data) {
+      tasks.value.push(response.data.data);
+      showNewTaskForm.value = false;
+      newTaskForm.value = {
+        title: '',
+        description: '',
+        priority: 1,
+        due_date: '',
+      };
+    }
+  } catch (error) {
+    taskError.value = error?.message || 'Failed to create task';
+    console.error('Failed to create task:', error);
+  } finally {
+    newTaskBusy.value = false;
+  }
 };
 
 onMounted(() => {
@@ -551,6 +646,7 @@ onMounted(() => {
   margin: 0.5rem 0;
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -719,6 +815,75 @@ onMounted(() => {
   padding: 1rem;
   border-radius: 0.5rem;
   margin: 1rem 0;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+  background: var(--color-background-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  margin: 1rem 0;
+}
+
+.compact-form {
+  gap: 0.75rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.field span {
+  font-weight: 500;
+  font-size: 0.875rem;
+}
+
+.field input,
+.field textarea,
+.field select {
+  padding: 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.375rem;
+  font-size: 0.95rem;
+  font-family: inherit;
+}
+
+.field input:focus,
+.field textarea:focus,
+.field select:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.field-row {
+  flex-direction: row;
+}
+
+.field-row span {
+  min-width: 100px;
+}
+
+.form-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 0.5rem;
+}
+
+.form-actions .btn {
+  min-width: 100px;
 }
 
 .muted-text {
