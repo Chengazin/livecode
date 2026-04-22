@@ -1,7 +1,7 @@
 <template>
   <section class="kanban-board">
     <div class="kanban-header">
-      <h2>{{ t("projectInfo.tasksKanban", "Tasks Kanban") }}</h2>
+      <h2>{{ t("projectInfo.tasksKanban") }}</h2>
       <div class="kanban-controls">
         <div class="view-toggle">
           <button
@@ -9,14 +9,14 @@
             :class="{ 'btn-primary': viewMode === 'kanban', 'btn-ghost': viewMode !== 'kanban' }"
             @click="viewMode = 'kanban'"
           >
-            {{ t("common.kanban", "Kanban") }}
+            {{ t("common.kanban") }}
           </button>
           <button
             class="btn btn-sm"
             :class="{ 'btn-primary': viewMode === 'list', 'btn-ghost': viewMode !== 'list' }"
             @click="viewMode = 'list'"
           >
-            {{ t("common.list", "List") }}
+            {{ t("common.list") }}
           </button>
         </div>
         <button
@@ -24,9 +24,9 @@
           class="btn btn-sm btn-primary"
           type="button"
           @click="showNewTaskForm = true"
-          title="Add new task"
+          :title="t('projectInfo.taskCreateAction')"
         >
-          {{ t("common.add", "Add Task") }} +
+          {{ t("projectInfo.taskCreateAction") }}
         </button>
         <button
           class="btn btn-sm btn-ghost"
@@ -44,36 +44,36 @@
     <!-- New Task Form -->
     <form v-if="showNewTaskForm && canCreateTasks" class="form-grid compact-form" @submit.prevent="createNewTask">
       <label class="field">
-        <span>{{ t("projectInfo.taskTitle", "Task Title") }}</span>
+        <span>{{ t("projectInfo.taskTitle") }}</span>
         <input
           v-model.trim="newTaskForm.title"
           type="text"
           maxlength="255"
           required
-          placeholder="Enter task title"
+          :placeholder="t('projectInfo.taskTitlePlaceholder')"
         />
       </label>
       <label class="field">
-        <span>{{ t("projectInfo.taskDescription", "Description") }}</span>
+        <span>{{ t("projectInfo.taskDescription") }}</span>
         <textarea
           v-model.trim="newTaskForm.description"
           rows="2"
           maxlength="2000"
-          placeholder="Enter task description (optional)"
+          :placeholder="t('projectInfo.taskDescriptionPlaceholder')"
         />
       </label>
       <div class="form-row">
         <label class="field field-row">
-          <span>{{ t("projectInfo.taskPriority", "Priority") }}</span>
+          <span>{{ t("projectInfo.taskPriority") }}</span>
           <select v-model.number="newTaskForm.priority">
-            <option :value="0">Low</option>
-            <option :value="1" selected>Medium</option>
-            <option :value="2">High</option>
-            <option :value="3">Urgent</option>
+            <option :value="0">{{ priorityLabels[0] }}</option>
+            <option :value="1">{{ priorityLabels[1] }}</option>
+            <option :value="2">{{ priorityLabels[2] }}</option>
+            <option :value="3">{{ priorityLabels[3] }}</option>
           </select>
         </label>
         <label class="field field-row">
-          <span>{{ t("projectInfo.taskDueDate", "Due Date") }}</span>
+          <span>{{ t("projectInfo.taskDueDate") }}</span>
           <input v-model="newTaskForm.due_date" type="date" />
         </label>
       </div>
@@ -91,7 +91,7 @@
     <div v-if="viewMode === 'kanban'" class="kanban-board-container">
       <div v-for="status in statuses" :key="status" class="kanban-column">
         <div class="column-header">
-          <h3>{{ STATUS_LABELS[status] }}</h3>
+          <h3>{{ statusLabels[status] }}</h3>
           <span class="task-count">{{ getTasksByStatus(status).length }}</span>
         </div>
 
@@ -113,7 +113,7 @@
             <div class="task-header">
               <strong class="task-title">{{ task.title }}</strong>
               <span class="task-priority" :data-priority="task.priority">
-                {{ PRIORITY_LABELS[task.priority] }}
+                {{ priorityLabels[task.priority] }}
               </span>
             </div>
 
@@ -121,7 +121,7 @@
 
             <div class="task-meta">
               <div v-if="task.assigned_to_user_id" class="task-assignee">
-                <small>{{ task.assignedTo?.name || `User #${task.assigned_to_user_id}` }}</small>
+                <small>{{ task.assignedTo?.name || t("projectInfo.taskUserFallback", { id: task.assigned_to_user_id }) }}</small>
               </div>
               <div v-if="task.due_date" class="task-due-date">
                 <small :class="{ overdue: isOverdue(task.due_date) }">
@@ -132,26 +132,28 @@
 
             <div class="task-actions">
               <button
+                v-if="canCreateTasks"
                 class="btn btn-xs btn-ghost"
                 type="button"
                 @click="editTask(task)"
-                title="Edit task"
+                :title="t('projectInfo.taskEditAction')"
               >
-                ✎
+                {{ t("common.edit") }}
               </button>
               <button
+                v-if="canCreateTasks"
                 class="btn btn-xs btn-ghost"
                 type="button"
                 @click="deleteTaskAction(task)"
-                title="Delete task"
+                :title="t('projectInfo.taskDeleteAction')"
               >
-                ✕
+                {{ t("common.delete") }}
               </button>
             </div>
           </div>
 
           <div v-if="getTasksByStatus(status).length === 0" class="empty-column">
-            {{ t("projectInfo.noTasks", "No tasks") }}
+            {{ t("projectInfo.noTasks") }}
           </div>
         </div>
       </div>
@@ -164,7 +166,7 @@
       </div>
 
       <div v-else-if="!taskLoading && tasks.length === 0" class="muted-text">
-        {{ t("projectInfo.noTasks", "No tasks yet") }}
+          {{ t("projectInfo.noTasks") }}
       </div>
 
       <div v-else class="project-tasks-list">
@@ -178,65 +180,133 @@
             <div class="project-task-title">
               <strong>{{ task.title }}</strong>
               <small class="project-task-status" :data-status="task.status">
-                {{ STATUS_LABELS[task.status] }}
+                {{ statusLabels[task.status] }}
               </small>
               <small class="project-task-priority" :data-priority="task.priority">
-                {{ PRIORITY_LABELS[task.priority] }}
+                {{ priorityLabels[task.priority] }}
               </small>
             </div>
             <div class="project-task-actions">
-              <button
-                v-if="task.status === 'backlog'"
-                class="btn btn-sm btn-ghost"
-                type="button"
-                :disabled="taskActionBusy"
-                @click="startTaskAction(task)"
-              >
-                Take Task
-              </button>
-              <button
-                v-if="task.status === 'in_progress'"
-                class="btn btn-sm btn-ghost"
-                type="button"
-                :disabled="taskActionBusy"
-                @click="completeTaskAction(task)"
-              >
-                Complete
-              </button>
-              <button
-                v-if="task.status === 'done'"
-                class="btn btn-sm btn-ghost"
-                type="button"
-                :disabled="taskActionBusy"
-                @click="reopenTaskAction(task)"
-              >
-                Reopen
-              </button>
-              <button
-                class="btn btn-sm btn-ghost"
-                type="button"
-                :disabled="taskActionBusy"
-                @click="deleteTaskAction(task)"
-              >
-                Delete
-              </button>
+                <button
+                  v-if="task.status === 'backlog'"
+                  class="btn btn-sm btn-ghost"
+                  type="button"
+                  :disabled="taskActionBusy"
+                  @click="startTaskAction(task)"
+                >
+                  {{ t("projectInfo.taskTakeAction") }}
+                </button>
+                <button
+                  v-if="task.status === 'in_progress'"
+                  class="btn btn-sm btn-ghost"
+                  type="button"
+                  :disabled="taskActionBusy"
+                  @click="completeTaskAction(task)"
+                >
+                  {{ t("projectInfo.taskCompleteAction") }}
+                </button>
+                <button
+                  v-if="task.status === 'done'"
+                  class="btn btn-sm btn-ghost"
+                  type="button"
+                  :disabled="taskActionBusy"
+                  @click="reopenTaskAction(task)"
+                >
+                  {{ t("projectInfo.taskReopenAction") }}
+                </button>
+                <button
+                  v-if="canCreateTasks"
+                  class="btn btn-sm btn-ghost"
+                  type="button"
+                  :disabled="taskActionBusy"
+                  @click="editTask(task)"
+                >
+                  {{ t("projectInfo.taskEditAction") }}
+                </button>
+                <button
+                  v-if="canCreateTasks"
+                  class="btn btn-sm btn-ghost"
+                  type="button"
+                  :disabled="taskActionBusy"
+                  @click="deleteTaskAction(task)"
+                >
+                  {{ t("projectInfo.taskDeleteAction") }}
+                </button>
+              </div>
             </div>
-          </div>
 
           <p v-if="task.description" class="project-task-description">{{ task.description }}</p>
 
           <div class="project-task-meta">
             <div v-if="task.assigned_to_user_id" class="project-task-meta-item">
-              <span class="label">{{ t("projectInfo.assignedTo", "Assigned to") }}:</span>
-              <span>{{ task.assignedTo?.name || `User #${task.assigned_to_user_id}` }}</span>
+              <span class="label">{{ t("projectInfo.assignedTo") }}:</span>
+              <span>{{ task.assignedTo?.name || t("projectInfo.taskUserFallback", { id: task.assigned_to_user_id }) }}</span>
             </div>
             <div v-if="task.due_date" class="project-task-meta-item">
-              <span class="label">{{ t("projectInfo.dueDate", "Due") }}:</span>
+              <span class="label">{{ t("projectInfo.dueDate") }}:</span>
               <span>{{ formatDate(task.due_date) }}</span>
             </div>
           </div>
         </article>
       </div>
+    </div>
+
+    <div v-if="showEditTaskForm" class="modal-overlay" @click.self="closeEditTask">
+      <section class="card task-edit-modal">
+        <h3>{{ t("projectInfo.taskEditTitle") }}</h3>
+        <form class="form-grid compact-form" @submit.prevent="saveTaskEdit">
+          <label class="field">
+            <span>{{ t("projectInfo.taskTitle") }}</span>
+            <input
+              v-model.trim="editTaskForm.title"
+              type="text"
+              maxlength="255"
+              required
+              :placeholder="t('projectInfo.taskTitlePlaceholder')"
+            />
+          </label>
+          <label class="field">
+            <span>{{ t("projectInfo.taskDescription") }}</span>
+            <textarea
+              v-model.trim="editTaskForm.description"
+              rows="3"
+              maxlength="2000"
+              :placeholder="t('projectInfo.taskDescriptionPlaceholder')"
+            />
+          </label>
+          <div class="form-row">
+            <label class="field field-row">
+              <span>{{ t("projectInfo.taskPriority") }}</span>
+              <select v-model.number="editTaskForm.priority">
+                <option :value="0">{{ priorityLabels[0] }}</option>
+                <option :value="1">{{ priorityLabels[1] }}</option>
+                <option :value="2">{{ priorityLabels[2] }}</option>
+                <option :value="3">{{ priorityLabels[3] }}</option>
+              </select>
+            </label>
+            <label class="field field-row">
+              <span>{{ t("projectInfo.taskDueDate") }}</span>
+              <input v-model="editTaskForm.due_date" type="date" />
+            </label>
+          </div>
+          <label class="field">
+            <span>{{ t("projectInfo.taskStatus") }}</span>
+            <select v-model="editTaskForm.status">
+              <option v-for="status in statuses" :key="`edit-status-${status}`" :value="status">
+                {{ statusLabels[status] }}
+              </option>
+            </select>
+          </label>
+          <div class="form-actions">
+            <button class="btn btn-primary" type="submit" :disabled="editTaskBusy">
+              {{ editTaskBusy ? t("common.saving") : t("common.save") }}
+            </button>
+            <button class="btn btn-ghost" type="button" :disabled="editTaskBusy" @click="closeEditTask">
+              {{ t("common.cancel") }}
+            </button>
+          </div>
+        </form>
+      </section>
     </div>
   </section>
 </template>
@@ -245,13 +315,11 @@
 import { ref, computed, onMounted, defineProps } from 'vue';
 import { useI18n } from 'vue-i18n';
 import {
-  getTasks,  createTask,  startTask,
+  getTasks, createTask, startTask,
   completeTask,
   reopenTask,
   deleteTask,
   updateTask,
-  PRIORITY_LABELS,
-  STATUS_LABELS,
 } from '@/services/tasks';
 
 const { t } = useI18n();
@@ -279,16 +347,93 @@ const statuses = ['backlog', 'in_progress', 'done'];
 const draggedTask = ref(null);
 const dragOverColumn = ref(null);
 const showNewTaskForm = ref(false);
+const showEditTaskForm = ref(false);
+const editTaskBusy = ref(false);
 const newTaskForm = ref({
   title: '',
   description: '',
   priority: 1,
   due_date: '',
 });
+const editTaskForm = ref({
+  project_task_id: null,
+  title: '',
+  description: '',
+  priority: 1,
+  due_date: '',
+  status: 'backlog',
+});
 
 const canCreateTasks = computed(() => {
   return props.permissions.can_manage_tasks || props.permissions.effective_role === 'admin' || props.permissions.effective_role === 'manager';
 });
+
+const priorityLabels = computed(() => ({
+  0: t('projectInfo.taskPriorityLow'),
+  1: t('projectInfo.taskPriorityMedium'),
+  2: t('projectInfo.taskPriorityHigh'),
+  3: t('projectInfo.taskPriorityUrgent'),
+}));
+
+const statusLabels = computed(() => ({
+  backlog: t('projectInfo.taskStatusBacklog'),
+  in_progress: t('projectInfo.taskStatusInProgress'),
+  done: t('projectInfo.taskStatusDone'),
+}));
+
+const TASK_ERROR_MAP = {
+  'Access denied.': 'projectInfo.taskErrorAccessDenied',
+  'Assignee must have access to the project': 'projectInfo.taskErrorAssigneeAccess',
+  'Task must be assigned before moving to in progress.': 'projectInfo.taskErrorTaskMustBeAssigned',
+  'Task must be assigned before starting.': 'projectInfo.taskErrorTaskMustBeAssigned',
+  'Only in-progress tasks can be completed.': 'projectInfo.taskErrorOnlyInProgress',
+  'Only completed tasks can be reopened.': 'projectInfo.taskErrorOnlyDoneReopen',
+  'Completed task must be reopened before starting.': 'projectInfo.taskErrorDoneNeedsReopen',
+};
+
+const normalizeDateForInput = (value) => {
+  if (!value) return '';
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return value;
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return '';
+  }
+  return parsed.toISOString().slice(0, 10);
+};
+
+const readError = (error) => {
+  if (error && typeof error === 'object') {
+    if (typeof error?.data?.message === 'string' && error.data.message.trim() !== '') {
+      return error.data.message.trim();
+    }
+    if (typeof error?.data?.error === 'string' && error.data.error.trim() !== '') {
+      return error.data.error.trim();
+    }
+    if (typeof error?.message === 'string' && error.message.trim() !== '') {
+      return error.message.trim();
+    }
+  }
+  return '';
+};
+
+const resolveTaskError = (error, fallbackKey) => {
+  const message = readError(error);
+  if (!message) {
+    return t(fallbackKey);
+  }
+
+  if (TASK_ERROR_MAP[message]) {
+    return t(TASK_ERROR_MAP[message]);
+  }
+
+  if (message.includes('WIP limit')) {
+    return t('projectInfo.taskErrorWipLimit');
+  }
+
+  return message;
+};
 
 const formatDate = (date) => {
   if (!date) return '';
@@ -314,17 +459,19 @@ const loadTasks = async () => {
       tasks.value = response.data.data;
     }
   } catch (error) {
-    taskError.value = error?.message || 'Failed to load tasks';
-    console.error('Failed to load tasks:', error);
+    taskError.value = resolveTaskError(error, 'projectInfo.taskLoadFailed');
+    console.error('Task load failed:', error);
   } finally {
     taskLoading.value = false;
   }
 };
 
 const handleTaskDrop = async (targetStatus) => {
-  if (!draggedTask.value) return;
+  const dragged = draggedTask.value;
+  if (!dragged || !dragged.project_task_id) return;
 
-  const sourceStatus = draggedTask.value.status;
+  const taskId = dragged.project_task_id;
+  const sourceStatus = dragged.status;
   if (sourceStatus === targetStatus) {
     dragOverColumn.value = null;
     return;
@@ -338,34 +485,35 @@ const handleTaskDrop = async (targetStatus) => {
 
     // Handle status transitions
     if (sourceStatus === 'backlog' && targetStatus === 'in_progress') {
-      response = await startTask(props.projectId, draggedTask.value.project_task_id);
+      response = await startTask(props.projectId, taskId);
     } else if (sourceStatus === 'in_progress' && targetStatus === 'done') {
-      response = await completeTask(props.projectId, draggedTask.value.project_task_id);
+      response = await completeTask(props.projectId, taskId);
     } else if (targetStatus === 'backlog' && sourceStatus === 'done') {
-      response = await reopenTask(props.projectId, draggedTask.value.project_task_id);
+      response = await reopenTask(props.projectId, taskId);
     } else if (targetStatus === 'backlog' && sourceStatus === 'in_progress') {
-      response = await updateTask(props.projectId, draggedTask.value.project_task_id, {
+      response = await updateTask(props.projectId, taskId, {
         status: 'backlog',
       });
     } else {
       // Generic status update
-      response = await updateTask(props.projectId, draggedTask.value.project_task_id, {
+      response = await updateTask(props.projectId, taskId, {
         status: targetStatus,
       });
     }
 
     if (response?.data?.data) {
-      const index = tasks.value.findIndex((t) => t.project_task_id === draggedTask.value.project_task_id);
+      const index = tasks.value.findIndex((t) => t.project_task_id === taskId);
       if (index !== -1) {
         tasks.value[index] = response.data.data;
       }
     }
   } catch (error) {
-    taskError.value = error?.message || 'Failed to move task';
-    console.error('Failed to move task:', error);
+    taskError.value = resolveTaskError(error, 'projectInfo.taskMoveFailed');
+    console.error('Task move failed:', error);
   } finally {
     taskActionBusy.value = false;
     dragOverColumn.value = null;
+    draggedTask.value = null;
   }
 };
 
@@ -382,8 +530,8 @@ const startTaskAction = async (task) => {
       }
     }
   } catch (error) {
-    taskError.value = error?.message || 'Failed to start task';
-    console.error('Failed to start task:', error);
+    taskError.value = resolveTaskError(error, 'projectInfo.taskStartFailed');
+    console.error('Task start failed:', error);
   } finally {
     taskActionBusy.value = false;
   }
@@ -402,8 +550,8 @@ const completeTaskAction = async (task) => {
       }
     }
   } catch (error) {
-    taskError.value = error?.message || 'Failed to complete task';
-    console.error('Failed to complete task:', error);
+    taskError.value = resolveTaskError(error, 'projectInfo.taskCompleteFailed');
+    console.error('Task complete failed:', error);
   } finally {
     taskActionBusy.value = false;
   }
@@ -422,15 +570,16 @@ const reopenTaskAction = async (task) => {
       }
     }
   } catch (error) {
-    taskError.value = error?.message || 'Failed to reopen task';
-    console.error('Failed to reopen task:', error);
+    taskError.value = resolveTaskError(error, 'projectInfo.taskReopenFailed');
+    console.error('Task reopen failed:', error);
   } finally {
     taskActionBusy.value = false;
   }
 };
 
 const deleteTaskAction = async (task) => {
-  if (!confirm('Are you sure you want to delete this task?')) return;
+  if (!canCreateTasks.value) return;
+  if (!confirm(t('projectInfo.taskDeleteConfirm', { title: task?.title || '' }))) return;
 
   taskActionBusy.value = true;
   taskError.value = '';
@@ -439,16 +588,72 @@ const deleteTaskAction = async (task) => {
     await deleteTask(props.projectId, task.project_task_id);
     tasks.value = tasks.value.filter((t) => t.project_task_id !== task.project_task_id);
   } catch (error) {
-    taskError.value = error?.message || 'Failed to delete task';
-    console.error('Failed to delete task:', error);
+    taskError.value = resolveTaskError(error, 'projectInfo.taskDeleteFailed');
+    console.error('Task delete failed:', error);
   } finally {
     taskActionBusy.value = false;
   }
 };
 
 const editTask = (task) => {
-  console.log('Edit task:', task);
-  // TODO: Implementation for editing tasks
+  if (!canCreateTasks.value || !task) {
+    return;
+  }
+
+  editTaskForm.value = {
+    project_task_id: task.project_task_id,
+    title: String(task.title || ''),
+    description: String(task.description || ''),
+    priority: Number.isInteger(task.priority) ? task.priority : 1,
+    due_date: normalizeDateForInput(task.due_date),
+    status: String(task.status || 'backlog'),
+  };
+  showEditTaskForm.value = true;
+};
+
+const closeEditTask = () => {
+  showEditTaskForm.value = false;
+  editTaskForm.value = {
+    project_task_id: null,
+    title: '',
+    description: '',
+    priority: 1,
+    due_date: '',
+    status: 'backlog',
+  };
+};
+
+const saveTaskEdit = async () => {
+  const taskId = editTaskForm.value.project_task_id;
+  if (!taskId) {
+    return;
+  }
+
+  editTaskBusy.value = true;
+  taskError.value = '';
+
+  try {
+    const response = await updateTask(props.projectId, taskId, {
+      title: editTaskForm.value.title,
+      description: editTaskForm.value.description || null,
+      priority: editTaskForm.value.priority,
+      due_date: editTaskForm.value.due_date || null,
+      status: editTaskForm.value.status,
+    });
+
+    if (response?.data?.data) {
+      const index = tasks.value.findIndex((item) => item.project_task_id === taskId);
+      if (index !== -1) {
+        tasks.value[index] = response.data.data;
+      }
+      closeEditTask();
+    }
+  } catch (error) {
+    taskError.value = resolveTaskError(error, 'projectInfo.taskUpdateFailed');
+    console.error('Task update failed:', error);
+  } finally {
+    editTaskBusy.value = false;
+  }
 };
 
 const createNewTask = async () => {
@@ -474,8 +679,8 @@ const createNewTask = async () => {
       };
     }
   } catch (error) {
-    taskError.value = error?.message || 'Failed to create task';
-    console.error('Failed to create task:', error);
+    taskError.value = resolveTaskError(error, 'projectInfo.taskCreateFailed');
+    console.error('Task create failed:', error);
   } finally {
     newTaskBusy.value = false;
   }
@@ -514,7 +719,7 @@ onMounted(() => {
 .view-toggle {
   display: flex;
   gap: 0.25rem;
-  background: var(--color-background-secondary);
+  background: var(--surface-muted);
   padding: 0.25rem;
   border-radius: 0.5rem;
 }
@@ -534,7 +739,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  background: var(--color-background-secondary);
+  background: var(--surface);
   border-radius: 0.75rem;
   padding: 1rem;
   min-height: 500px;
@@ -554,7 +759,7 @@ onMounted(() => {
 }
 
 .task-count {
-  background: var(--color-primary);
+  background: var(--accent);
   color: white;
   padding: 0.25rem 0.75rem;
   border-radius: 9999px;
@@ -574,13 +779,13 @@ onMounted(() => {
 }
 
 .kanban-tasks.drag-over {
-  background-color: rgba(59, 130, 246, 0.1);
-  border: 2px dashed var(--color-primary);
+  background-color: var(--focus-ring);
+  border: 2px dashed var(--accent);
 }
 
 .kanban-task-card {
-  background: var(--color-background-tertiary);
-  border: 1px solid var(--color-border);
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
   border-radius: 0.5rem;
   padding: 0.75rem;
   cursor: grab;
@@ -607,7 +812,7 @@ onMounted(() => {
 
 .task-title {
   font-size: 0.95rem;
-  color: var(--color-text-primary);
+  color: var(--text-primary);
   word-break: break-word;
 }
 
@@ -618,7 +823,7 @@ onMounted(() => {
   font-size: 0.75rem;
   font-weight: 500;
   white-space: nowrap;
-  background-color: var(--color-background-tertiary);
+  background-color: var(--surface);
 }
 
 .task-priority[data-priority='3'] {
@@ -643,7 +848,7 @@ onMounted(() => {
 
 .task-description {
   font-size: 0.875rem;
-  color: var(--color-text-secondary);
+  color: var(--text-muted);
   margin: 0.5rem 0;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -662,7 +867,7 @@ onMounted(() => {
 
 .task-assignee,
 .task-due-date {
-  background: var(--color-background-tertiary);
+  background: var(--surface);
   padding: 0.25rem 0.5rem;
   border-radius: 0.25rem;
 }
@@ -689,7 +894,7 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   height: 200px;
-  color: var(--color-text-secondary);
+  color: var(--text-muted);
   font-style: italic;
 }
 
@@ -704,8 +909,8 @@ onMounted(() => {
 }
 
 .project-task-item {
-  background: var(--color-background-tertiary);
-  border: 1px solid var(--color-border);
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
   border-radius: 0.5rem;
   padding: 1rem;
 }
@@ -788,7 +993,7 @@ onMounted(() => {
 }
 
 .project-task-description {
-  color: var(--color-text-secondary);
+  color: var(--text-muted);
   margin: 0.5rem 0;
   font-size: 0.95rem;
 }
@@ -798,7 +1003,7 @@ onMounted(() => {
   gap: 1rem;
   flex-wrap: wrap;
   font-size: 0.875rem;
-  color: var(--color-text-secondary);
+  color: var(--text-muted);
 }
 
 .project-task-meta-item {
@@ -811,8 +1016,9 @@ onMounted(() => {
 }
 
 .error-banner {
-  background-color: #fee2e2;
-  color: #991b1b;
+  border: 1px solid var(--error-border);
+  background: var(--error-bg);
+  color: var(--danger);
   padding: 1rem;
   border-radius: 0.5rem;
   margin: 1rem 0;
@@ -822,8 +1028,8 @@ onMounted(() => {
   display: grid;
   grid-template-columns: 1fr;
   gap: 1rem;
-  background: var(--color-background-secondary);
-  border: 1px solid var(--color-border);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 0.5rem;
   padding: 1rem;
   margin: 1rem 0;
@@ -848,18 +1054,20 @@ onMounted(() => {
 .field textarea,
 .field select {
   padding: 0.5rem;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--border);
   border-radius: 0.375rem;
   font-size: 0.95rem;
   font-family: inherit;
+  background: var(--surface-muted);
+  color: var(--text-primary);
 }
 
 .field input:focus,
 .field textarea:focus,
 .field select:focus {
   outline: none;
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .form-row {
@@ -869,11 +1077,11 @@ onMounted(() => {
 }
 
 .field-row {
-  flex-direction: row;
+  flex-direction: column;
 }
 
 .field-row span {
-  min-width: 100px;
+  min-width: 0;
 }
 
 .form-actions {
@@ -888,9 +1096,19 @@ onMounted(() => {
 }
 
 .muted-text {
-  color: var(--color-text-secondary);
+  color: var(--text-muted);
   font-style: italic;
   padding: 2rem;
   text-align: center;
+}
+
+.task-edit-modal {
+  width: min(640px, 92vw);
+  max-height: 86vh;
+  overflow: auto;
+}
+
+.task-edit-modal h3 {
+  margin: 0 0 0.75rem;
 }
 </style>

@@ -3,9 +3,8 @@
 namespace App\Services;
 
 use App\Models\ProjectTask;
-use App\Models\User;
+use DomainException;
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Pagination\Paginator;
 use Illuminate\Support\Facades\Log;
 
 class ProjectTaskService
@@ -22,7 +21,7 @@ class ProjectTaskService
         string $title,
         ?string $description = null,
         int $priority = ProjectTask::PRIORITY_MEDIUM,
-        ?\DateTime $dueDate = null
+        ?\DateTimeInterface $dueDate = null
     ): ProjectTask {
         $task = ProjectTask::query()->create([
             'project_id' => $projectId,
@@ -53,6 +52,39 @@ class ProjectTaskService
         $allowedFields = ['title', 'description', 'priority', 'due_date', 'status'];
         $updateData = array_intersect_key($data, array_flip($allowedFields));
 
+        if (array_key_exists('status', $updateData)) {
+            $nextStatus = (string) $updateData['status'];
+
+            if ($nextStatus === ProjectTask::STATUS_IN_PROGRESS) {
+                if (!$task->assigned_to_user_id) {
+                    throw new DomainException('Task must be assigned before moving to in progress.');
+                }
+
+                if (
+                    $task->status !== ProjectTask::STATUS_IN_PROGRESS
+                    && !self::canStartNewTask($task->project_id, (int) $task->assigned_to_user_id)
+                ) {
+                    throw new DomainException(sprintf(
+                        'User has reached WIP limit (%d active tasks).',
+                        self::WIP_LIMIT
+                    ));
+                }
+
+                if (!$task->started_at) {
+                    $updateData['started_at'] = now();
+                }
+                $updateData['completed_at'] = null;
+            }
+
+            if ($nextStatus === ProjectTask::STATUS_DONE) {
+                $updateData['completed_at'] = now();
+            }
+
+            if ($nextStatus === ProjectTask::STATUS_BACKLOG) {
+                $updateData['completed_at'] = null;
+            }
+        }
+
         if (!empty($updateData)) {
             $task->update($updateData);
             Log::info('Project task updated', [
@@ -70,36 +102,51 @@ class ProjectTaskService
      */
     public static function assignTaskToUser(ProjectTask $task, int $userId): ProjectTask
     {
-        $task->assignTo($userId);
+        $previousAssignee = (int) ($task->assigned_to_user_id ?? 0);
+        $willConsumeWipSlot = $task->status === ProjectTask::STATUS_BACKLOG
+            || ($task->status === ProjectTask::STATUS_IN_PROGRESS && $previousAssignee !== $userId);
 
-        // If moving to In Progress, check WIP limit
-        if ($task->status === ProjectTask::STATUS_IN_PROGRESS) {
-            if (!self::canStartNewTask($task->project_id, $userId)) {
-                // Revert back to Backlog with assignee
-                $task->update(['status' => ProjectTask::STATUS_BACKLOG]);
-                throw new \Exception(sprintf(
-                    'User has reached WIP limit (%d active tasks).',
-                    self::WIP_LIMIT
-                ));
-            }
+        if ($willConsumeWipSlot && !self::canStartNewTask($task->project_id, $userId)) {
+            throw new DomainException(sprintf(
+                'User has reached WIP limit (%d active tasks).',
+                self::WIP_LIMIT
+            ));
         }
 
-        // Notify the assigned user
-        NotificationService::sendNotification(
-            userId: $userId,
-            type: 'task_assigned',
-            title: 'New Task Assigned',
-            message: sprintf('Task "%s" has been assigned to you', $task->title),
-            data: [
-                'project_id' => $task->project_id,
-                'project_task_id' => $task->project_task_id,
-                'task_title' => $task->title,
-            ]
-        );
+        $task->assignTo($userId);
+
+        if ($previousAssignee !== 0 && $previousAssignee !== $userId) {
+            NotificationService::sendNotification(
+                userId: $previousAssignee,
+                type: 'task_unassigned',
+                title: 'Task Reassigned',
+                message: sprintf('Task "%s" has been reassigned', $task->title),
+                data: [
+                    'project_id' => $task->project_id,
+                    'project_task_id' => $task->project_task_id,
+                    'task_title' => $task->title,
+                ]
+            );
+        }
+
+        if ($previousAssignee !== $userId) {
+            NotificationService::sendNotification(
+                userId: $userId,
+                type: 'task_assigned',
+                title: 'New Task Assigned',
+                message: sprintf('Task "%s" has been assigned to you', $task->title),
+                data: [
+                    'project_id' => $task->project_id,
+                    'project_task_id' => $task->project_task_id,
+                    'task_title' => $task->title,
+                ]
+            );
+        }
 
         Log::info('Project task assigned', [
             'project_task_id' => $task->project_task_id,
             'assigned_to' => $userId,
+            'previous_assignee' => $previousAssignee ?: null,
         ]);
 
         return $task;
@@ -111,11 +158,23 @@ class ProjectTaskService
      */
     public static function startTask(ProjectTask $task): ProjectTask
     {
+        if ($task->status === ProjectTask::STATUS_DONE) {
+            throw new DomainException('Completed task must be reopened before starting.');
+        }
+
+        if (!$task->assigned_to_user_id) {
+            throw new DomainException('Task must be assigned before starting.');
+        }
+
+        if ($task->status === ProjectTask::STATUS_IN_PROGRESS) {
+            return $task;
+        }
+
         // Check WIP limit for assigned user
         if ($task->assigned_to_user_id) {
             $canStart = self::canStartNewTask($task->project_id, $task->assigned_to_user_id);
             if (!$canStart) {
-                throw new \Exception(sprintf(
+                throw new DomainException(sprintf(
                     'User has reached WIP limit (%d active tasks). Cannot start more tasks.',
                     self::WIP_LIMIT
                 ));
@@ -137,6 +196,14 @@ class ProjectTaskService
      */
     public static function completeTask(ProjectTask $task): ProjectTask
     {
+        if ($task->status === ProjectTask::STATUS_DONE) {
+            return $task;
+        }
+
+        if ($task->status !== ProjectTask::STATUS_IN_PROGRESS) {
+            throw new DomainException('Only in-progress tasks can be completed.');
+        }
+
         $task->markDone();
 
         // Notify task creator
@@ -164,6 +231,14 @@ class ProjectTaskService
      */
     public static function reopenTask(ProjectTask $task): ProjectTask
     {
+        if ($task->status === ProjectTask::STATUS_BACKLOG) {
+            return $task;
+        }
+
+        if ($task->status !== ProjectTask::STATUS_DONE) {
+            throw new DomainException('Only completed tasks can be reopened.');
+        }
+
         $task->reopen();
 
         // Notify task creator that task was reopened

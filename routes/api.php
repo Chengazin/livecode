@@ -80,7 +80,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('projects/{projectId}/tasks/{projectTaskId}/assign', [ProjectTaskController::class, 'assignTask']);
     Route::post('projects/{projectId}/tasks/{projectTaskId}/start', [ProjectTaskController::class, 'startTask']);
     Route::post('projects/{projectId}/tasks/{projectTaskId}/complete', [ProjectTaskController::class, 'completeTask']);
-    Route::post('projects/{projectId}/tasks/{projectTaskId}/close', [ProjectTaskController::class, 'closeTask']);
+    Route::post('projects/{projectId}/tasks/{projectTaskId}/reopen', [ProjectTaskController::class, 'reopenTask']);
+    Route::post('projects/{projectId}/tasks/{projectTaskId}/close', [ProjectTaskController::class, 'reopenTask']);
     Route::post('projects/{projectId}/tasks/{projectTaskId}/unassign', [ProjectTaskController::class, 'unassignTask']);
     Route::delete('projects/{projectId}/tasks/{projectTaskId}', [ProjectTaskController::class, 'destroy']);
 

@@ -27,6 +27,12 @@
   --error-bg: #fff0ee;
   --response-bg: #0f1724;
   --response-text: #d7e3ff;
+  --color-background-secondary: var(--surface);
+  --color-background-tertiary: var(--surface-muted);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-muted);
+  --color-border: var(--border);
+  --color-primary: var(--accent);
   color-scheme: light;
 }
 
