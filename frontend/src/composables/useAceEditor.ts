@@ -34,7 +34,7 @@ export function useAceEditor(options) {
   const languageOptions = [
     { value: "javascript", label: "JavaScript" },
     { value: "typescript", label: "TypeScript" },
-    { value: "json", label: "JSON" },
+    { value: "json", label: "JSON / ipynb" },
     { value: "html", label: "HTML" },
     { value: "css", label: "CSS" },
     { value: "php", label: "PHP" },
@@ -55,6 +55,7 @@ export function useAceEditor(options) {
       js: "javascript",
       ts: "typescript",
       json: "json",
+      ipynb: "json",
       html: "html",
       htm: "html",
       css: "css",

@@ -204,27 +204,41 @@ class ProjectTaskController extends Controller
         int $taskId,
         ProjectAccessService $access
     ): JsonResponse {
-        $project = $this->resolveProject($request, $projectId, $access, true);
+        $project = $this->resolveProject($request, $projectId, $access, false);
         if ($project instanceof JsonResponse) {
             return $project;
         }
 
-        $task = ProjectTask::forProject($projectId)->findOrFail($taskId);
         $user = $request->user();
         if (!$user) {
             return response()->json(['message' => 'Unauthorized.'], 401);
         }
 
+        if (! $access->canTakeTasks($project, $user)) {
+            return response()->json(['message' => 'Access denied.'], 403);
+        }
+
+        $task = ProjectTask::forProject($projectId)->findOrFail($taskId);
+        $currentUserId = (int) $user->user_id;
+        $assignedToUserId = (int) ($task->assigned_to_user_id ?: 0);
+        $canManageTasks = $access->canManageTasks($project, $user);
+
+        if (! $canManageTasks && $assignedToUserId !== 0 && $assignedToUserId !== $currentUserId) {
+            return response()->json([
+                'error' => 'Task is assigned to another user.',
+            ], 422);
+        }
+
         if (!$task->assigned_to_user_id) {
-            if (!ProjectTaskService::canStartNewTask($projectId, (int) $user->user_id)) {
+            if (!ProjectTaskService::canStartNewTask($projectId, $currentUserId)) {
                 return response()->json([
                     'error' => 'You have reached WIP limit (3 active tasks)',
-                    'wip_slots' => ProjectTaskService::getWipSlots($projectId, (int) $user->user_id),
+                    'wip_slots' => ProjectTaskService::getWipSlots($projectId, $currentUserId),
                 ], 422);
             }
 
             $task->update([
-                'assigned_to_user_id' => (int) $user->user_id,
+                'assigned_to_user_id' => $currentUserId,
                 'assigned_at' => now(),
             ]);
         }
@@ -232,7 +246,7 @@ class ProjectTaskController extends Controller
         try {
             $task = ProjectTaskService::startTask($task);
         } catch (DomainException $exception) {
-            $targetUserId = (int) ($task->assigned_to_user_id ?: $user->user_id);
+            $targetUserId = (int) ($task->assigned_to_user_id ?: $currentUserId);
 
             return response()->json([
                 'error' => $exception->getMessage(),

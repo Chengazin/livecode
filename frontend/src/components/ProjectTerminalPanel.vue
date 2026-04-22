@@ -155,6 +155,8 @@ let fitFrameId = null;
 let fitRetryTimerId = null;
 let pendingRunFilePath = "";
 const SESSION_REFRESH_INTERVAL_MS = 45000;
+const SESSION_TRANSCRIPT_MAX_CHARS = 450000;
+const sessionTranscripts = new Map();
 
 function cancelScheduledFit() {
   if (typeof window === "undefined") {
@@ -187,11 +189,72 @@ function readError(value) {
 }
 
 function writeSystemLine(message) {
+  const line = `[terminal] ${message}`;
+  const fallbackSessionId = Number(activeSocketSessionId.value || selectedSessionId.value || 0);
+  appendSessionTranscript(fallbackSessionId, `${line}\r\n`);
+
   if (!term) {
     return;
   }
 
-  term.writeln(`[terminal] ${message}`);
+  term.writeln(line);
+}
+
+function normalizeSessionId(value) {
+  const numeric = Number(value || 0);
+  if (!Number.isInteger(numeric) || numeric <= 0) {
+    return 0;
+  }
+
+  return numeric;
+}
+
+function appendSessionTranscript(sessionId, chunk) {
+  const normalizedSessionId = normalizeSessionId(sessionId);
+  const text = String(chunk || "");
+  if (!normalizedSessionId || !text) {
+    return;
+  }
+
+  const key = String(normalizedSessionId);
+  const current = String(sessionTranscripts.get(key) || "");
+  let next = current + text;
+
+  if (next.length > SESSION_TRANSCRIPT_MAX_CHARS) {
+    next = next.slice(-SESSION_TRANSCRIPT_MAX_CHARS);
+  }
+
+  sessionTranscripts.set(key, next);
+}
+
+function renderSessionTranscript(sessionId) {
+  if (!term) {
+    return;
+  }
+
+  const normalizedSessionId = normalizeSessionId(sessionId);
+  const key = normalizedSessionId ? String(normalizedSessionId) : "";
+  const snapshot = key ? String(sessionTranscripts.get(key) || "") : "";
+
+  term.reset();
+  if (snapshot) {
+    term.write(snapshot);
+  }
+}
+
+function renderSelectedSessionTranscript() {
+  renderSessionTranscript(selectedSessionId.value);
+}
+
+function pruneSessionTranscripts() {
+  const activeIds = new Set(sessions.value.map((item) => normalizeSessionId(item?.terminal_session_id)));
+
+  for (const key of sessionTranscripts.keys()) {
+    const numericKey = Number(key);
+    if (!activeIds.has(numericKey)) {
+      sessionTranscripts.delete(key);
+    }
+  }
 }
 
 function parseSocketMessage(raw) {
@@ -439,8 +502,11 @@ function handleSocketPayload(payload) {
   const type = String(payload.type || "");
 
   if (type === "output") {
+    const chunk = String(payload.data || "");
+    appendSessionTranscript(activeSocketSessionId.value || selectedSessionId.value, chunk);
+
     if (term) {
-      term.write(String(payload.data || ""));
+      term.write(chunk);
     }
     return;
   }
@@ -492,6 +558,8 @@ async function refreshSessions(options = {}) {
   if (!projectId) {
     sessions.value = [];
     selectedSessionId.value = 0;
+    sessionTranscripts.clear();
+    renderSessionTranscript(0);
     return;
   }
 
@@ -502,7 +570,12 @@ async function refreshSessions(options = {}) {
   try {
     const response = await listTerminalSessions(projectId);
     sessions.value = Array.isArray(response.data?.sessions) ? response.data.sessions : [];
+    pruneSessionTranscripts();
     applySessionSelection();
+    const selectedId = Number(selectedSessionId.value || 0);
+    if (!connected.value || Number(activeSocketSessionId.value || 0) !== selectedId) {
+      renderSelectedSessionTranscript();
+    }
 
     if (connected.value && activeSocketSessionId.value) {
       const activeIsVisible = openSessions.value.some((item) => {
@@ -602,6 +675,7 @@ async function connectSelected() {
 
   try {
     fitTerminal();
+    renderSessionTranscript(session.terminal_session_id);
 
     const response = await issueTerminalTicket(projectId, session.terminal_session_id);
     const ticket = String(response.data?.ticket || "").trim();
@@ -904,6 +978,8 @@ watch(projectIdValue, (value) => {
   disconnectSocket("project-changed");
   error.value = "";
   notice.value = "";
+  sessionTranscripts.clear();
+  renderSessionTranscript(0);
 
   if (!value) {
     sessions.value = [];
@@ -917,12 +993,15 @@ watch(projectIdValue, (value) => {
 watch(selectedSessionId, (value) => {
   const nextId = Number(value || 0);
   if (!nextId) {
+    renderSessionTranscript(0);
     return;
   }
 
   if (connected.value && activeSocketSessionId.value !== nextId) {
     disconnectSocket("session-selection-changed");
   }
+
+  renderSelectedSessionTranscript();
 });
 
 onMounted(() => {
@@ -941,6 +1020,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   disconnectSocket("component-unmount");
+  sessionTranscripts.clear();
 
   if (typeof window !== "undefined") {
     window.removeEventListener("resize", scheduleTerminalFit);

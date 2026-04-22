@@ -14,6 +14,7 @@ class ProjectTaskTest extends TestCase
 
     private User $user;
     private User $otherUser;
+    private User $viewerUser;
     private User $outsiderUser;
     private Project $project;
 
@@ -23,11 +24,13 @@ class ProjectTaskTest extends TestCase
 
         $this->user = User::factory()->create();
         $this->otherUser = User::factory()->create();
+        $this->viewerUser = User::factory()->create();
         $this->outsiderUser = User::factory()->create();
         $this->project = Project::factory()->create(['owner_id' => $this->user->user_id]);
 
         $this->project->users()->attach($this->user->user_id, ['role' => 'maintainer']);
         $this->project->users()->attach($this->otherUser->user_id, ['role' => 'developer']);
+        $this->project->users()->attach($this->viewerUser->user_id, ['role' => 'viewer']);
     }
 
     public function test_create_task()
@@ -378,5 +381,89 @@ class ProjectTaskTest extends TestCase
 
         $response->assertStatus(422)
             ->assertJsonPath('error', 'Assignee must have access to the project');
+    }
+
+    public function test_developer_cannot_create_task()
+    {
+        $response = $this->actingAs($this->otherUser, 'sanctum')->postJson(
+            "/api/projects/{$this->project->project_id}/tasks",
+            [
+                'title' => 'Developer task create attempt',
+            ]
+        );
+
+        $response->assertStatus(403)
+            ->assertJsonPath('message', 'Access denied.');
+    }
+
+    public function test_developer_cannot_update_task()
+    {
+        $task = ProjectTask::create([
+            'project_id' => $this->project->project_id,
+            'created_by_user_id' => $this->user->user_id,
+            'title' => 'Original',
+            'status' => ProjectTask::STATUS_BACKLOG,
+        ]);
+
+        $response = $this->actingAs($this->otherUser, 'sanctum')->patchJson(
+            "/api/projects/{$this->project->project_id}/tasks/{$task->project_task_id}",
+            [
+                'title' => 'Updated by developer',
+            ]
+        );
+
+        $response->assertStatus(403)
+            ->assertJsonPath('message', 'Access denied.');
+    }
+
+    public function test_developer_cannot_delete_task()
+    {
+        $task = ProjectTask::create([
+            'project_id' => $this->project->project_id,
+            'created_by_user_id' => $this->user->user_id,
+            'title' => 'Delete attempt',
+        ]);
+
+        $response = $this->actingAs($this->otherUser, 'sanctum')->deleteJson(
+            "/api/projects/{$this->project->project_id}/tasks/{$task->project_task_id}"
+        );
+
+        $response->assertStatus(403)
+            ->assertJsonPath('message', 'Access denied.');
+    }
+
+    public function test_developer_can_take_unassigned_task()
+    {
+        $task = ProjectTask::create([
+            'project_id' => $this->project->project_id,
+            'created_by_user_id' => $this->user->user_id,
+            'title' => 'Take me',
+            'status' => ProjectTask::STATUS_BACKLOG,
+        ]);
+
+        $response = $this->actingAs($this->otherUser, 'sanctum')->postJson(
+            "/api/projects/{$this->project->project_id}/tasks/{$task->project_task_id}/start"
+        );
+
+        $response->assertStatus(200)
+            ->assertJsonPath('data.status', ProjectTask::STATUS_IN_PROGRESS)
+            ->assertJsonPath('data.assigned_to_user_id', $this->otherUser->user_id);
+    }
+
+    public function test_viewer_cannot_take_task()
+    {
+        $task = ProjectTask::create([
+            'project_id' => $this->project->project_id,
+            'created_by_user_id' => $this->user->user_id,
+            'title' => 'Viewer cannot take',
+            'status' => ProjectTask::STATUS_BACKLOG,
+        ]);
+
+        $response = $this->actingAs($this->viewerUser, 'sanctum')->postJson(
+            "/api/projects/{$this->project->project_id}/tasks/{$task->project_task_id}/start"
+        );
+
+        $response->assertStatus(403)
+            ->assertJsonPath('message', 'Access denied.');
     }
 }

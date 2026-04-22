@@ -20,7 +20,7 @@
           </button>
         </div>
         <button
-          v-if="canCreateTasks"
+          v-if="canManageTasks"
           class="btn btn-sm btn-primary"
           type="button"
           @click="showNewTaskForm = true"
@@ -42,7 +42,7 @@
     <p v-if="taskError" class="error-banner">{{ taskError }}</p>
 
     <!-- New Task Form -->
-    <form v-if="showNewTaskForm && canCreateTasks" class="form-grid compact-form" @submit.prevent="createNewTask">
+    <form v-if="showNewTaskForm && canManageTasks" class="form-grid compact-form" @submit.prevent="createNewTask">
       <label class="field">
         <span>{{ t("projectInfo.taskTitle") }}</span>
         <input
@@ -106,7 +106,7 @@
             v-for="task in getTasksByStatus(status)"
             :key="`task-${task.project_task_id}`"
             class="kanban-task-card"
-            draggable="true"
+            :draggable="canDragTask(task)"
             @dragstart="draggedTask = task"
             @dragend="draggedTask = null"
           >
@@ -132,7 +132,7 @@
 
             <div class="task-actions">
               <button
-                v-if="canCreateTasks"
+                v-if="canManageTasks"
                 class="btn btn-xs btn-ghost"
                 type="button"
                 @click="editTask(task)"
@@ -141,7 +141,7 @@
                 {{ t("common.edit") }}
               </button>
               <button
-                v-if="canCreateTasks"
+                v-if="canManageTasks"
                 class="btn btn-xs btn-ghost"
                 type="button"
                 @click="deleteTaskAction(task)"
@@ -188,7 +188,7 @@
             </div>
             <div class="project-task-actions">
                 <button
-                  v-if="task.status === 'backlog'"
+                  v-if="task.status === 'backlog' && canTakeTasks"
                   class="btn btn-sm btn-ghost"
                   type="button"
                   :disabled="taskActionBusy"
@@ -197,7 +197,7 @@
                   {{ t("projectInfo.taskTakeAction") }}
                 </button>
                 <button
-                  v-if="task.status === 'in_progress'"
+                  v-if="task.status === 'in_progress' && canManageTasks"
                   class="btn btn-sm btn-ghost"
                   type="button"
                   :disabled="taskActionBusy"
@@ -206,7 +206,7 @@
                   {{ t("projectInfo.taskCompleteAction") }}
                 </button>
                 <button
-                  v-if="task.status === 'done'"
+                  v-if="task.status === 'done' && canManageTasks"
                   class="btn btn-sm btn-ghost"
                   type="button"
                   :disabled="taskActionBusy"
@@ -215,7 +215,7 @@
                   {{ t("projectInfo.taskReopenAction") }}
                 </button>
                 <button
-                  v-if="canCreateTasks"
+                  v-if="canManageTasks"
                   class="btn btn-sm btn-ghost"
                   type="button"
                   :disabled="taskActionBusy"
@@ -224,7 +224,7 @@
                   {{ t("projectInfo.taskEditAction") }}
                 </button>
                 <button
-                  v-if="canCreateTasks"
+                  v-if="canManageTasks"
                   class="btn btn-sm btn-ghost"
                   type="button"
                   :disabled="taskActionBusy"
@@ -364,8 +364,16 @@ const editTaskForm = ref({
   status: 'backlog',
 });
 
-const canCreateTasks = computed(() => {
-  return props.permissions.can_manage_tasks || props.permissions.effective_role === 'admin' || props.permissions.effective_role === 'manager';
+const canManageTasks = computed(() => {
+  return Boolean(props.permissions?.can_manage_tasks);
+});
+
+const canTakeTasks = computed(() => {
+  if (typeof props.permissions?.can_take_tasks === 'boolean') {
+    return props.permissions.can_take_tasks;
+  }
+
+  return canManageTasks.value || Boolean(props.permissions?.can_write_project);
 });
 
 const priorityLabels = computed(() => ({
@@ -383,6 +391,7 @@ const statusLabels = computed(() => ({
 
 const TASK_ERROR_MAP = {
   'Access denied.': 'projectInfo.taskErrorAccessDenied',
+  'Task is assigned to another user.': 'projectInfo.taskErrorAccessDenied',
   'Assignee must have access to the project': 'projectInfo.taskErrorAssigneeAccess',
   'Task must be assigned before moving to in progress.': 'projectInfo.taskErrorTaskMustBeAssigned',
   'Task must be assigned before starting.': 'projectInfo.taskErrorTaskMustBeAssigned',
@@ -449,6 +458,35 @@ const getTasksByStatus = (status) => {
   return tasks.value.filter((task) => task.status === status);
 };
 
+const canDragTask = (task) => {
+  if (!task || !task.status) {
+    return false;
+  }
+
+  if (canManageTasks.value) {
+    return true;
+  }
+
+  return canTakeTasks.value && task.status === 'backlog';
+};
+
+const canDropTaskToStatus = (task, targetStatus) => {
+  if (!task || !targetStatus) {
+    return false;
+  }
+
+  const sourceStatus = String(task.status || '');
+  if (sourceStatus === targetStatus) {
+    return false;
+  }
+
+  if (sourceStatus === 'backlog' && targetStatus === 'in_progress') {
+    return canTakeTasks.value;
+  }
+
+  return canManageTasks.value;
+};
+
 const loadTasks = async () => {
   taskLoading.value = true;
   taskError.value = '';
@@ -469,6 +507,12 @@ const loadTasks = async () => {
 const handleTaskDrop = async (targetStatus) => {
   const dragged = draggedTask.value;
   if (!dragged || !dragged.project_task_id) return;
+
+  if (!canDropTaskToStatus(dragged, targetStatus)) {
+    dragOverColumn.value = null;
+    draggedTask.value = null;
+    return;
+  }
 
   const taskId = dragged.project_task_id;
   const sourceStatus = dragged.status;
@@ -578,7 +622,7 @@ const reopenTaskAction = async (task) => {
 };
 
 const deleteTaskAction = async (task) => {
-  if (!canCreateTasks.value) return;
+  if (!canManageTasks.value) return;
   if (!confirm(t('projectInfo.taskDeleteConfirm', { title: task?.title || '' }))) return;
 
   taskActionBusy.value = true;
@@ -596,7 +640,7 @@ const deleteTaskAction = async (task) => {
 };
 
 const editTask = (task) => {
-  if (!canCreateTasks.value || !task) {
+  if (!canManageTasks.value || !task) {
     return;
   }
 
@@ -624,6 +668,10 @@ const closeEditTask = () => {
 };
 
 const saveTaskEdit = async () => {
+  if (!canManageTasks.value) {
+    return;
+  }
+
   const taskId = editTaskForm.value.project_task_id;
   if (!taskId) {
     return;
@@ -657,6 +705,10 @@ const saveTaskEdit = async () => {
 };
 
 const createNewTask = async () => {
+  if (!canManageTasks.value) {
+    return;
+  }
+
   newTaskBusy.value = true;
   taskError.value = '';
 

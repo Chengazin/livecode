@@ -4,7 +4,7 @@
       <h2>{{ t("projectInfo.tasksTitle", "Tasks") }}</h2>
       <div class="sidebar-controls">
         <button
-          v-if="canCreateTasks"
+          v-if="canManageTasks"
           class="btn btn-sm btn-ghost"
           type="button"
           @click="showNewTaskForm = true"
@@ -29,7 +29,7 @@
     </div>
 
     <!-- New Task Form -->
-    <form v-if="showNewTaskForm && canCreateTasks" class="form-grid compact-form" @submit.prevent="createNewTask">
+    <form v-if="showNewTaskForm && canManageTasks" class="form-grid compact-form" @submit.prevent="createNewTask">
       <label class="field">
         <span>{{ t("projectInfo.taskTitle", "Task Title") }}</span>
         <input
@@ -96,7 +96,7 @@
           </div>
           <div class="project-task-actions">
             <button
-              v-if="task.status === 'backlog'"
+              v-if="task.status === 'backlog' && canTakeTasks"
               class="btn btn-sm btn-ghost"
               type="button"
               :disabled="taskActionBusy"
@@ -105,7 +105,7 @@
               Take Task
             </button>
             <button
-              v-if="task.status === 'in_progress'"
+              v-if="task.status === 'in_progress' && canManageTasks"
               class="btn btn-sm btn-ghost"
               type="button"
               :disabled="taskActionBusy"
@@ -114,7 +114,7 @@
               Complete
             </button>
             <button
-              v-if="task.status === 'done'"
+              v-if="task.status === 'done' && canManageTasks"
               class="btn btn-sm btn-ghost"
               type="button"
               :disabled="taskActionBusy"
@@ -123,6 +123,7 @@
               Reopen
             </button>
             <button
+              v-if="canManageTasks"
               class="btn btn-sm btn-ghost"
               type="button"
               :disabled="taskActionBusy"
@@ -201,8 +202,16 @@ const newTaskForm = ref({
   due_date: '',
 });
 
-const canCreateTasks = computed(() => {
-  return props.permissions.can_manage_tasks || props.permissions.effective_role === 'admin' || props.permissions.effective_role === 'manager';
+const canManageTasks = computed(() => {
+  return Boolean(props.permissions?.can_manage_tasks);
+});
+
+const canTakeTasks = computed(() => {
+  if (typeof props.permissions?.can_take_tasks === 'boolean') {
+    return props.permissions.can_take_tasks;
+  }
+
+  return canManageTasks.value || Boolean(props.permissions?.can_write_project);
 });
 
 const formatDate = (date) => {
@@ -234,6 +243,10 @@ const loadTasks = async () => {
 };
 
 const createNewTask = async () => {
+  if (!canManageTasks.value) {
+    return;
+  }
+
   newTaskBusy.value = true;
   taskError.value = '';
 
@@ -284,6 +297,10 @@ const startTaskAction = async (task) => {
 };
 
 const completeTaskAction = async (task) => {
+  if (!canManageTasks.value) {
+    return;
+  }
+
   taskActionBusy.value = true;
   taskError.value = '';
 
@@ -304,6 +321,10 @@ const completeTaskAction = async (task) => {
 };
 
 const reopenTaskAction = async (task) => {
+  if (!canManageTasks.value) {
+    return;
+  }
+
   taskActionBusy.value = true;
   taskError.value = '';
 
@@ -324,6 +345,7 @@ const reopenTaskAction = async (task) => {
 };
 
 const deleteTaskAction = async (task) => {
+  if (!canManageTasks.value) return;
   if (!confirm('Are you sure you want to delete this task?')) return;
 
   taskActionBusy.value = true;

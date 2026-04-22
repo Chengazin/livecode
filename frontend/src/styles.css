@@ -387,10 +387,16 @@ select:focus {
   text-decoration: none;
   background: var(--accent);
   color: #ffffff;
+  transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
 }
 
-.btn:hover {
+.btn:hover:not(:disabled) {
   background: var(--accent-strong);
+}
+
+.btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .btn:disabled {
@@ -404,15 +410,31 @@ select:focus {
   color: var(--text-primary);
 }
 
+.btn-secondary:hover:not(:disabled) {
+  border-color: #a9bedb;
+  background: #eaf1fb;
+  color: var(--text-primary);
+}
+
 .btn-ghost {
   border-color: var(--border);
   background: transparent;
   color: var(--text-primary);
 }
 
+.btn-ghost:hover:not(:disabled) {
+  border-color: #a9bedb;
+  background: rgba(118, 149, 192, 0.14);
+  color: var(--text-primary);
+}
+
 .btn-danger {
   background: var(--danger);
   color: #ffffff;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #9f2f23;
 }
 
 .btn-sm {
@@ -3145,7 +3167,7 @@ select:focus {
 
 .project-settings-tab:hover {
   border-color: #7ea2cf;
-  color: var(--text);
+  color: var(--text-primary);
 }
 
 .project-settings-tab.is-active {
@@ -3359,6 +3381,23 @@ select:focus {
 .terminal-host .xterm,
 .terminal-host .xterm * {
   box-sizing: content-box;
+}
+
+[data-theme="dark"] .btn-secondary:hover:not(:disabled) {
+  border-color: #4f6f9a;
+  background: #1b2f4a;
+  color: #e7eefc;
+}
+
+[data-theme="dark"] .btn-ghost:hover:not(:disabled) {
+  border-color: #4f6f9a;
+  background: rgba(95, 126, 166, 0.2);
+  color: #e7eefc;
+}
+
+[data-theme="dark"] .btn-danger:hover:not(:disabled) {
+  background: #f08f87;
+  color: #1d0f0d;
 }
 
 [data-theme="dark"] .endpoint-item:hover {

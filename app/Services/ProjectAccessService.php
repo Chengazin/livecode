@@ -111,6 +111,14 @@ class ProjectAccessService
         return $this->hasProjectRole($project, $user, [
             self::ROLE_OWNER,
             ProjectParticipant::ROLE_MAINTAINER,
+        ]);
+    }
+
+    public function canTakeTasks(Project $project, User $user): bool
+    {
+        return $this->hasProjectRole($project, $user, [
+            self::ROLE_OWNER,
+            ProjectParticipant::ROLE_MAINTAINER,
             ProjectParticipant::ROLE_DEVELOPER,
         ]);
     }

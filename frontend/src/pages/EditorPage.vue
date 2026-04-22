@@ -624,7 +624,7 @@ const realtimeRemoteColors = [
 const EDITOR_SYNC_DEBOUNCE_MS = 36;
 const EDITOR_SYNC_DELETE_DEBOUNCE_MS = 160;
 const AceRange = ace.require("ace/range").Range;
-const ACE_LINE_COMMENT_TRIGGER_OFFSET_X = 3;
+const ACE_LINE_COMMENT_TRIGGER_OFFSET_X = -26;
 const ACE_LINE_COMMENT_POPOVER_OFFSET_X = 8;
 
 let activeRealtimeProjectId = "";

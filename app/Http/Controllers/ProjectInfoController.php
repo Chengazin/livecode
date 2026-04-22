@@ -157,6 +157,7 @@ class ProjectInfoController extends Controller
                 'can_manage_settings' => $access->canManageSettings($project, $user),
                 'can_manage_participants' => $access->canManageParticipants($project, $user),
                 'can_manage_tasks' => $access->canManageTasks($project, $user),
+                'can_take_tasks' => $access->canTakeTasks($project, $user),
                 'can_write_project' => $access->canWriteProject($project, $user),
                 'can_create_pull_request' => $repoConfigured && $access->canCreatePullRequest($project, $user),
                 'can_connect_repository' => $access->canManageRepository($project, $user),
