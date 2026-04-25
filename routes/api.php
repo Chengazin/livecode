@@ -43,13 +43,17 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('projects/{projectId}/git/branch', [ProjectGitController::class, 'createBranch']);
     Route::post('projects/{projectId}/git/checkout-branch', [ProjectGitController::class, 'checkoutBranch']);
     Route::post('projects/{projectId}/git/checkout-commit', [ProjectGitController::class, 'checkoutCommit']);
-    Route::post('projects/{projectId}/filesystem', [ProjectFilesystemController::class, 'handle']);
+    Route::post('projects/{projectId}/filesystem', [ProjectFilesystemController::class, 'handle'])
+        ->middleware('throttle:project-write');
     Route::get('projects/{projectId}/filesystem/tree', [ProjectFilesystemController::class, 'tree']);
     Route::get('projects/{projectId}/filesystem/file', [ProjectFilesystemController::class, 'readFile']);
     Route::get('projects/{projectId}/filesystem/download', [ProjectFilesystemController::class, 'download']);
-    Route::put('projects/{projectId}/filesystem/file', [ProjectFilesystemController::class, 'writeFile']);
-    Route::put('projects/{projectId}/filesystem/move', [ProjectFilesystemController::class, 'movePath']);
-    Route::delete('projects/{projectId}/filesystem/item', [ProjectFilesystemController::class, 'deletePath']);
+    Route::put('projects/{projectId}/filesystem/file', [ProjectFilesystemController::class, 'writeFile'])
+        ->middleware('throttle:project-write');
+    Route::put('projects/{projectId}/filesystem/move', [ProjectFilesystemController::class, 'movePath'])
+        ->middleware('throttle:project-write');
+    Route::delete('projects/{projectId}/filesystem/item', [ProjectFilesystemController::class, 'deletePath'])
+        ->middleware('throttle:project-write');
     Route::post('projects/{projectId}/forgejo/connect', [ProjectForgejoController::class, 'connect']);
     Route::post('projects/{projectId}/forgejo/save', [ProjectForgejoController::class, 'save']);
     Route::post('projects/{projectId}/forgejo/pull-request', [ProjectForgejoController::class, 'pullRequest']);
@@ -57,33 +61,53 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('projects/{projectId}/realtime/heartbeat', [ProjectRealtimeController::class, 'heartbeat']);
     Route::get('projects/{projectId}/realtime/presence', [ProjectRealtimeController::class, 'presence']);
     Route::get('projects/{projectId}/realtime/chat', [ProjectRealtimeController::class, 'chatIndex']);
-    Route::post('projects/{projectId}/realtime/chat', [ProjectRealtimeController::class, 'chatStore']);
-    Route::patch('projects/{projectId}/realtime/chat/{messageId}', [ProjectRealtimeController::class, 'chatUpdate']);
-    Route::delete('projects/{projectId}/realtime/chat/{messageId}', [ProjectRealtimeController::class, 'chatDestroy']);
-    Route::post('projects/{projectId}/speech/transcribe', [ProjectSpeechController::class, 'transcribe']);
-    Route::post('projects/{projectId}/realtime/editor-state', [ProjectRealtimeController::class, 'editorState']);
-    Route::post('projects/{projectId}/realtime/editor-sync', [ProjectRealtimeController::class, 'editorSync']);
+    Route::post('projects/{projectId}/realtime/chat', [ProjectRealtimeController::class, 'chatStore'])
+        ->middleware('throttle:realtime-chat');
+    Route::patch('projects/{projectId}/realtime/chat/{messageId}', [ProjectRealtimeController::class, 'chatUpdate'])
+        ->middleware('throttle:realtime-chat');
+    Route::delete('projects/{projectId}/realtime/chat/{messageId}', [ProjectRealtimeController::class, 'chatDestroy'])
+        ->middleware('throttle:realtime-chat');
+    Route::post('projects/{projectId}/speech/transcribe', [ProjectSpeechController::class, 'transcribe'])
+        ->middleware('throttle:project-write');
+    Route::post('projects/{projectId}/realtime/editor-state', [ProjectRealtimeController::class, 'editorState'])
+        ->middleware('throttle:realtime-editor');
+    Route::post('projects/{projectId}/realtime/editor-sync', [ProjectRealtimeController::class, 'editorSync'])
+        ->middleware('throttle:realtime-editor');
     Route::get('projects/{projectId}/code-comments', [ProjectCodeCommentController::class, 'index']);
-    Route::post('projects/{projectId}/code-comments', [ProjectCodeCommentController::class, 'store']);
-    Route::delete('projects/{projectId}/code-comments/{commentId}', [ProjectCodeCommentController::class, 'destroy']);
-    Route::post('projects/{projectId}/terminal/sessions', [ProjectTerminalController::class, 'store']);
+    Route::post('projects/{projectId}/code-comments', [ProjectCodeCommentController::class, 'store'])
+        ->middleware('throttle:project-write');
+    Route::delete('projects/{projectId}/code-comments/{commentId}', [ProjectCodeCommentController::class, 'destroy'])
+        ->middleware('throttle:project-write');
+    Route::post('projects/{projectId}/terminal/sessions', [ProjectTerminalController::class, 'store'])
+        ->middleware('throttle:project-write');
     Route::get('projects/{projectId}/terminal/sessions', [ProjectTerminalController::class, 'index']);
-    Route::post('projects/{projectId}/terminal/sessions/{terminalSessionId}/ticket', [ProjectTerminalController::class, 'ticket']);
-    Route::post('projects/{projectId}/terminal/sessions/{terminalSessionId}/close', [ProjectTerminalController::class, 'close']);
+    Route::post('projects/{projectId}/terminal/sessions/{terminalSessionId}/ticket', [ProjectTerminalController::class, 'ticket'])
+        ->middleware('throttle:project-write');
+    Route::post('projects/{projectId}/terminal/sessions/{terminalSessionId}/close', [ProjectTerminalController::class, 'close'])
+        ->middleware('throttle:project-write');
 
     // Project Tasks
     Route::get('projects/{projectId}/tasks/stats', [ProjectTaskController::class, 'getStats']);
     Route::get('projects/{projectId}/tasks', [ProjectTaskController::class, 'index']);
-    Route::post('projects/{projectId}/tasks', [ProjectTaskController::class, 'store']);
+    Route::post('projects/{projectId}/tasks', [ProjectTaskController::class, 'store'])
+        ->middleware('throttle:project-write');
     Route::get('projects/{projectId}/tasks/{projectTaskId}', [ProjectTaskController::class, 'show']);
-    Route::patch('projects/{projectId}/tasks/{projectTaskId}', [ProjectTaskController::class, 'update']);
-    Route::post('projects/{projectId}/tasks/{projectTaskId}/assign', [ProjectTaskController::class, 'assignTask']);
-    Route::post('projects/{projectId}/tasks/{projectTaskId}/start', [ProjectTaskController::class, 'startTask']);
-    Route::post('projects/{projectId}/tasks/{projectTaskId}/complete', [ProjectTaskController::class, 'completeTask']);
-    Route::post('projects/{projectId}/tasks/{projectTaskId}/reopen', [ProjectTaskController::class, 'reopenTask']);
-    Route::post('projects/{projectId}/tasks/{projectTaskId}/close', [ProjectTaskController::class, 'reopenTask']);
-    Route::post('projects/{projectId}/tasks/{projectTaskId}/unassign', [ProjectTaskController::class, 'unassignTask']);
-    Route::delete('projects/{projectId}/tasks/{projectTaskId}', [ProjectTaskController::class, 'destroy']);
+    Route::patch('projects/{projectId}/tasks/{projectTaskId}', [ProjectTaskController::class, 'update'])
+        ->middleware('throttle:project-write');
+    Route::post('projects/{projectId}/tasks/{projectTaskId}/assign', [ProjectTaskController::class, 'assignTask'])
+        ->middleware('throttle:project-write');
+    Route::post('projects/{projectId}/tasks/{projectTaskId}/start', [ProjectTaskController::class, 'startTask'])
+        ->middleware('throttle:project-write');
+    Route::post('projects/{projectId}/tasks/{projectTaskId}/complete', [ProjectTaskController::class, 'completeTask'])
+        ->middleware('throttle:project-write');
+    Route::post('projects/{projectId}/tasks/{projectTaskId}/reopen', [ProjectTaskController::class, 'reopenTask'])
+        ->middleware('throttle:project-write');
+    Route::post('projects/{projectId}/tasks/{projectTaskId}/close', [ProjectTaskController::class, 'completeTask'])
+        ->middleware('throttle:project-write');
+    Route::post('projects/{projectId}/tasks/{projectTaskId}/unassign', [ProjectTaskController::class, 'unassignTask'])
+        ->middleware('throttle:project-write');
+    Route::delete('projects/{projectId}/tasks/{projectTaskId}', [ProjectTaskController::class, 'destroy'])
+        ->middleware('throttle:project-write');
 
     Route::post('project-invitations/accept', [ProjectInvitationController::class, 'accept'])->middleware('throttle:invitation-accept');
     Route::apiResource('project-participants', ProjectParticipantController::class);

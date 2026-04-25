@@ -2,10 +2,10 @@
 
 namespace App\Http\Controllers;
 
-use App\Events\ProjectRealtimeEvent;
 use App\Models\Project;
 use App\Models\ProjectParticipant;
 use App\Services\ProjectAccessService;
+use App\Services\ProjectRealtime\ProjectParticipantsRealtimeService;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -62,7 +62,11 @@ class ProjectParticipantController extends Controller
         return $participant->loadMissing('user:user_id,name,email,avatar_type,avatar_preset,avatar_path');
     }
 
-    public function store(Request $request, ProjectAccessService $access)
+    public function store(
+        Request $request,
+        ProjectAccessService $access,
+        ProjectParticipantsRealtimeService $participantsRealtime
+    )
     {
         $user = $request->user();
 
@@ -102,7 +106,7 @@ class ProjectParticipantController extends Controller
             return response()->json(['message' => 'Participant already exists.'], 409);
         }
 
-        $this->broadcastParticipantsUpdated(
+        $participantsRealtime->broadcastParticipantsUpdated(
             $project,
             (int) $user->user_id,
             'participant_added',
@@ -158,7 +162,12 @@ class ProjectParticipantController extends Controller
         return $participant->loadMissing('user:user_id,name,email,avatar_type,avatar_preset,avatar_path');
     }
 
-    public function destroy(Request $request, int $participantId, ProjectAccessService $access)
+    public function destroy(
+        Request $request,
+        int $participantId,
+        ProjectAccessService $access,
+        ProjectParticipantsRealtimeService $participantsRealtime
+    )
     {
         $user = $request->user();
 
@@ -185,7 +194,7 @@ class ProjectParticipantController extends Controller
         $removedUserId = (int) $participant->user_id;
         $participant->delete();
 
-        $this->broadcastParticipantsUpdated(
+        $participantsRealtime->broadcastParticipantsUpdated(
             $project,
             (int) $user->user_id,
             'participant_removed',
@@ -198,25 +207,4 @@ class ProjectParticipantController extends Controller
         return response()->noContent();
     }
 
-    /**
-     * @param array<string, mixed> $payload
-     */
-    private function broadcastParticipantsUpdated(Project $project, int $actorUserId, string $action, array $payload = []): void
-    {
-        try {
-            event(new ProjectRealtimeEvent(
-                (int) $project->project_id,
-                $actorUserId,
-                'realtime.project.participants.updated',
-                array_merge(
-                    [
-                        'action' => $action,
-                    ],
-                    $payload
-                )
-            ));
-        } catch (\Throwable) {
-            // Presence updates are best-effort and must not break participant writes.
-        }
-    }
 }

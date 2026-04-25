@@ -34,7 +34,7 @@ class ProjectFilesystemController extends Controller
 
         $project = Project::query()->findOrFail($projectId);
 
-        if (! $access->userHasAccess($project, $user)) {
+        if (! $access->canWriteProject($project, $user)) {
             return response()->json(['error' => 'access_denied'], 403);
         }
 
@@ -144,7 +144,7 @@ class ProjectFilesystemController extends Controller
 
         $project = Project::query()->findOrFail($projectId);
 
-        if (! $access->userHasAccess($project, $user)) {
+        if (! $access->canWriteProject($project, $user)) {
             return response()->json(['error' => 'access_denied'], 403);
         }
 
@@ -181,7 +181,7 @@ class ProjectFilesystemController extends Controller
 
         $project = Project::query()->findOrFail($projectId);
 
-        if (! $access->userHasAccess($project, $user)) {
+        if (! $access->canWriteProject($project, $user)) {
             return response()->json(['error' => 'access_denied'], 403);
         }
 
@@ -219,7 +219,7 @@ class ProjectFilesystemController extends Controller
 
         $project = Project::query()->findOrFail($projectId);
 
-        if (! $access->userHasAccess($project, $user)) {
+        if (! $access->canWriteProject($project, $user)) {
             return response()->json(['error' => 'access_denied'], 403);
         }
 

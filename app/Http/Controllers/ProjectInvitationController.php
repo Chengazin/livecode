@@ -2,13 +2,13 @@
 
 namespace App\Http\Controllers;
 
-use App\Events\ProjectRealtimeEvent;
 use App\Models\Project;
 use App\Models\ProjectInvitation;
 use App\Models\ProjectParticipant;
+use App\Services\ProjectInvitation\ProjectInvitationTokenService;
+use App\Services\ProjectRealtime\ProjectParticipantsRealtimeService;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 class ProjectInvitationController extends Controller
@@ -59,7 +59,7 @@ class ProjectInvitationController extends Controller
         return $invitation;
     }
 
-    public function store(Request $request)
+    public function store(Request $request, ProjectInvitationTokenService $tokenService)
     {
         $user = $request->user();
 
@@ -81,7 +81,7 @@ class ProjectInvitationController extends Controller
         $payload = [
             'project_id' => (int) $data['project_id'],
             'inviter_user_id' => (int) $user->user_id,
-            'invite_token' => (string) ($data['invite_token'] ?? $this->generateInviteToken()),
+            'invite_token' => (string) ($data['invite_token'] ?? $tokenService->generateInviteToken()),
             'expires_at' => $data['expires_at'] ?? null,
         ];
 
@@ -94,7 +94,7 @@ class ProjectInvitationController extends Controller
         return response()->json($invitation, 201);
     }
 
-    public function accept(Request $request)
+    public function accept(Request $request, ProjectParticipantsRealtimeService $participantsRealtime)
     {
         $user = $request->user();
 
@@ -144,7 +144,7 @@ class ProjectInvitationController extends Controller
         $invitation->delete();
 
         if ($participantJoined) {
-            $this->broadcastParticipantsUpdated(
+            $participantsRealtime->broadcastParticipantsUpdated(
                 $project,
                 (int) $user->user_id,
                 'participant_joined',
@@ -217,34 +217,4 @@ class ProjectInvitationController extends Controller
         return (int) $project->owner_id === $userId;
     }
 
-    /**
-     * @param array<string, mixed> $payload
-     */
-    private function broadcastParticipantsUpdated(Project $project, int $actorUserId, string $action, array $payload = []): void
-    {
-        try {
-            event(new ProjectRealtimeEvent(
-                (int) $project->project_id,
-                $actorUserId,
-                'realtime.project.participants.updated',
-                array_merge(
-                    [
-                        'action' => $action,
-                    ],
-                    $payload
-                )
-            ));
-        } catch (\Throwable) {
-            // Broadcast failures should not block invitation acceptance.
-        }
-    }
-
-    private function generateInviteToken(): string
-    {
-        do {
-            $token = Str::random(64);
-        } while (ProjectInvitation::query()->where('invite_token', $token)->exists());
-
-        return $token;
-    }
 }

@@ -17,6 +17,10 @@ abstract class TestCase extends BaseTestCase
         parent::setUp();
 
         // Set test-specific configurations
-        config(['hashing.bcrypt.rounds' => 4]); // Fast hashing for tests
+        config([
+            'hashing.bcrypt.rounds' => 4, // Fast hashing for tests
+            'captcha.provider' => 'disabled',
+            'captcha.verify_on.registration_initiate' => false,
+        ]);
     }
 }

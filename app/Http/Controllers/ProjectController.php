@@ -5,8 +5,8 @@ namespace App\Http\Controllers;
 use App\Models\Project;
 use App\Models\User;
 use App\Services\ProjectAccessService;
+use App\Services\Project\ProjectDirectoryService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
 
 class ProjectController extends Controller
 {
@@ -52,7 +52,7 @@ class ProjectController extends Controller
         return $project;
     }
 
-    public function store(Request $request)
+    public function store(Request $request, ProjectDirectoryService $directories)
     {
         $user = $request->user();
 
@@ -66,7 +66,7 @@ class ProjectController extends Controller
             'is_public' => ['sometimes', 'boolean'],
         ]);
 
-        $projectPath = $this->createProjectDirectory($user->user_id, $user->email, $data['name']);
+        $projectPath = $directories->createProjectDirectory((int) $user->user_id, (string) $user->email, (string) $data['name']);
 
         try {
             $project = Project::query()->create([
@@ -77,7 +77,7 @@ class ProjectController extends Controller
                 'is_public' => $data['is_public'] ?? false,
             ]);
         } catch (\Throwable $e) {
-            Storage::disk('local')->deleteDirectory($projectPath);
+            $directories->deleteProjectDirectory($projectPath);
             throw $e;
         }
 
@@ -110,7 +110,7 @@ class ProjectController extends Controller
         return $project;
     }
 
-    public function destroy(Request $request, int $projectId)
+    public function destroy(Request $request, int $projectId, ProjectDirectoryService $directories)
     {
         $user = $request->user();
 
@@ -124,74 +124,14 @@ class ProjectController extends Controller
             return response()->json(['message' => 'Access denied.'], 403);
         }
 
-        $this->deleteProjectDirectory($project);
+        $directories->deleteProjectDirectory((string) $project->project_path);
         $project->delete();
 
         return response()->noContent();
     }
 
-    private function createProjectDirectory(int $userId, string $email, string $projectName): string
-    {
-        $disk = Storage::disk('local');
-        $root = 'projects';
-
-        if (! $disk->exists($root)) {
-            $disk->makeDirectory($root);
-        }
-
-        $userSegment = $this->sanitizePathSegment($userId.'_'.$email);
-        $userPath = $root.'/'.$userSegment;
-
-        if (! $disk->exists($userPath)) {
-            $disk->makeDirectory($userPath);
-        }
-
-        $projectSegment = $this->sanitizePathSegment($projectName);
-        $basePath = $userPath.'/'.$projectSegment;
-        $path = $basePath;
-        $suffix = 2;
-
-        while ($disk->exists($path) || Project::query()->where('project_path', $path)->exists()) {
-            $path = $basePath.'-'.$suffix;
-            $suffix++;
-        }
-
-        if (! $disk->makeDirectory($path)) {
-            abort(500, 'Failed to create project directory.');
-        }
-
-        return $path;
-    }
-
-    private function sanitizePathSegment(string $value): string
-    {
-        $value = trim($value);
-        $value = preg_replace('/[\/\\\\]+/', '-', $value);
-        $value = preg_replace('/[:*?"<>|]/', '', $value);
-        $value = preg_replace('/[\x00-\x1F\x7F]/u', '', $value);
-        $value = preg_replace('/\s+/', ' ', $value);
-        $value = trim($value, " .\t\n\r\0\x0B");
-
-        if ($value === '') {
-            return 'untitled';
-        }
-
-        return $value;
-    }
-
     private function isOwner(Project $project, User $user): bool
     {
         return (int) $project->owner_id === (int) $user->user_id;
-    }
-
-    private function deleteProjectDirectory(Project $project): void
-    {
-        $projectPath = trim((string) $project->project_path, '/');
-
-        if ($projectPath === '') {
-            return;
-        }
-
-        Storage::disk('local')->deleteDirectory($projectPath);
     }
 }

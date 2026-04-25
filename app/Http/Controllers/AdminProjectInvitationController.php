@@ -3,9 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Models\ProjectInvitation;
+use App\Services\ProjectInvitation\ProjectInvitationTokenService;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 class AdminProjectInvitationController extends Controller
@@ -89,7 +89,7 @@ class AdminProjectInvitationController extends Controller
             ->findOrFail($invitationId);
     }
 
-    public function store(Request $request)
+    public function store(Request $request, ProjectInvitationTokenService $tokenService)
     {
         $data = $request->validate([
             'project_id' => ['required', 'integer', 'exists:projects,project_id'],
@@ -102,7 +102,7 @@ class AdminProjectInvitationController extends Controller
         $payload = [
             'project_id' => (int) $data['project_id'],
             'inviter_user_id' => (int) $data['inviter_user_id'],
-            'invite_token' => (string) ($data['invite_token'] ?? $this->generateInviteToken()),
+            'invite_token' => (string) ($data['invite_token'] ?? $tokenService->generateInviteToken()),
             'expires_at' => $data['expires_at'] ?? null,
             'created_at' => $data['created_at'] ?? now(),
         ];
@@ -161,14 +161,5 @@ class AdminProjectInvitationController extends Controller
         $invitation->delete();
 
         return response()->noContent();
-    }
-
-    private function generateInviteToken(): string
-    {
-        do {
-            $token = Str::random(64);
-        } while (ProjectInvitation::query()->where('invite_token', $token)->exists());
-
-        return $token;
     }
 }

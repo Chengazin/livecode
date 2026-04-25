@@ -1,5 +1,7 @@
 /vendor
 /node_modules
+**/node_modules/
+frontend/dist/
 npm-debug.log
 yarn-error.log
 *.log

@@ -6,6 +6,7 @@ use App\Models\Project;
 use App\Models\ProjectParticipant;
 use App\Models\ProjectTerminalSession;
 use App\Models\User;
+use App\Services\ProjectAccessService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
@@ -326,6 +327,43 @@ class ProjectTerminalTest extends TestCase
             ->assertJson(['message' => 'Access denied.']);
     }
 
+    public function test_viewer_cannot_access_terminal_endpoints(): void
+    {
+        $owner = $this->createUser('terminal-owner-viewer@example.com');
+        $viewer = $this->createUser('terminal-viewer@example.com');
+        $project = $this->createProject($owner, 'Terminal viewer access');
+        $this->addParticipant($project, $viewer, 'viewer');
+
+        $access = app(ProjectAccessService::class);
+
+        $this->assertSame('viewer', $access->resolveEffectiveRole($project, $viewer));
+        $this->assertFalse($access->canWriteProject($project, $viewer));
+
+        $create = $this->actingAs($owner, 'sanctum')->postJson('/api/projects/'.$project->project_id.'/terminal/sessions', [
+            'name' => 'Owner shared',
+            'shared' => true,
+        ])->assertStatus(201);
+
+        $sessionId = (int) $create->json('session.terminal_session_id');
+
+        $this->actingAs($viewer, 'sanctum')
+            ->getJson('/api/projects/'.$project->project_id.'/terminal/sessions')
+            ->assertStatus(403)
+            ->assertJson(['message' => 'Access denied.']);
+
+        $this->actingAs($viewer, 'sanctum')
+            ->postJson('/api/projects/'.$project->project_id.'/terminal/sessions', [
+                'name' => 'Viewer shell',
+            ])
+            ->assertStatus(403)
+            ->assertJson(['message' => 'Access denied.']);
+
+        $this->actingAs($viewer, 'sanctum')
+            ->postJson('/api/projects/'.$project->project_id.'/terminal/sessions/'.$sessionId.'/ticket')
+            ->assertStatus(403)
+            ->assertJson(['message' => 'Access denied.']);
+    }
+
     public function test_gateway_callback_closes_terminal_session_and_stores_metadata(): void
     {
         $owner = $this->createUser('terminal-owner-8@example.com');
@@ -565,11 +603,12 @@ class ProjectTerminalTest extends TestCase
         return $project;
     }
 
-    private function addParticipant(Project $project, User $user): void
+    private function addParticipant(Project $project, User $user, string $role = 'developer'): void
     {
         ProjectParticipant::query()->create([
             'project_id' => $project->project_id,
             'user_id' => $user->user_id,
+            'role' => $role,
             'joined_at' => now(),
         ]);
     }
