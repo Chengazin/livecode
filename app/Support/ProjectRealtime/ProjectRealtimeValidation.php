@@ -1,9 +1,6 @@
 <?php
-
 namespace App\Support\ProjectRealtime;
-
 use App\Services\ProjectRealtime\ProjectRealtimeLimits;
-
 final class ProjectRealtimeValidation
 {
     /**
@@ -21,7 +18,6 @@ final class ProjectRealtimeValidation
             'selection_end_column' => ['nullable', 'integer', 'min:0'],
         ];
     }
-
     /**
      * @return array<string, array<int, string>>
      */
@@ -32,7 +28,6 @@ final class ProjectRealtimeValidation
             'limit' => ['nullable', 'integer', 'min:1', 'max:200'],
         ];
     }
-
     /**
      * @return array<string, array<int, string>>
      */
@@ -42,7 +37,6 @@ final class ProjectRealtimeValidation
             'message' => ['required', 'string', 'max:1000'],
         ];
     }
-
     /**
      * @return array<string, array<int, string>>
      */
@@ -60,7 +54,6 @@ final class ProjectRealtimeValidation
             'cursor_column' => ['nullable', 'integer', 'min:0'],
         ];
     }
-
     /**
      * @return array<string, array<int, string>>
      */

@@ -1,10 +1,7 @@
 <?php
-
 namespace App\Services\ProjectRealtime;
-
 use App\Models\User;
 use Illuminate\Support\Facades\Cache;
-
 class ProjectRealtimeEditorService
 {
     /**
@@ -16,7 +13,6 @@ class ProjectRealtimeEditorService
         $clientId = $this->normalizeEditorClientId($user, trim((string) $data['client_id']));
         $opId = trim((string) $data['op_id']);
         $baseRevision = (int) $data['base_revision'];
-
         return $this->withEditorLock($projectId, $path, function () use (
             $projectId,
             $user,
@@ -30,11 +26,9 @@ class ProjectRealtimeEditorService
             if ($state === null) {
                 $state = $this->createEditorState($path, '');
             }
-
             $currentRevision = (int) ($state['revision'] ?? 0);
             $currentContent = (string) ($state['content'] ?? '');
             $history = $this->normalizeEditorHistory($state['operations'] ?? []);
-
             if ($baseRevision !== $currentRevision) {
                 $oldestRevision = count($history) > 0
                     ? (int) ($history[0]['revision'] ?? $currentRevision)
@@ -44,7 +38,6 @@ class ProjectRealtimeEditorService
                 $missing = $requiresResync
                     ? []
                     : $this->historyAfterRevision($history, $baseRevision);
-
                 return new ProjectRealtimeResult(
                     409,
                     [
@@ -56,13 +49,11 @@ class ProjectRealtimeEditorService
                     ]
                 );
             }
-
             $operation = $this->sanitizeEditorOperation([
                 'start' => (int) $data['start'],
                 'delete_count' => (int) $data['delete_count'],
                 'insert_text' => (string) ($data['insert_text'] ?? ''),
             ], $currentContent);
-
             if ((int) $operation['delete_count'] === 0 && (string) $operation['insert_text'] === '') {
                 return new ProjectRealtimeResult(
                     200,
@@ -72,7 +63,6 @@ class ProjectRealtimeEditorService
                     ]
                 );
             }
-
             $nextContent = $this->applyEditorOperation($currentContent, $operation);
             if ($this->textLength($nextContent) > ProjectRealtimeLimits::EDITOR_MAX_CONTENT_LENGTH) {
                 return new ProjectRealtimeResult(
@@ -80,7 +70,6 @@ class ProjectRealtimeEditorService
                     ['message' => 'Resulting content exceeds maximum allowed length.']
                 );
             }
-
             $nextRevision = $currentRevision + 1;
             $entry = [
                 'revision' => $nextRevision,
@@ -93,12 +82,10 @@ class ProjectRealtimeEditorService
                 'cursor_column' => array_key_exists('cursor_column', $data) ? $data['cursor_column'] : null,
                 'created_at' => now()->toISOString(),
             ];
-
             $history[] = $entry;
             if (count($history) > ProjectRealtimeLimits::EDITOR_MAX_HISTORY) {
                 $history = array_slice($history, -ProjectRealtimeLimits::EDITOR_MAX_HISTORY);
             }
-
             $state = [
                 'path' => $path,
                 'revision' => $nextRevision,
@@ -106,9 +93,7 @@ class ProjectRealtimeEditorService
                 'operations' => $history,
                 'updated_at' => now()->toISOString(),
             ];
-
             $this->storeEditorState($projectId, $path, $state);
-
             return new ProjectRealtimeResult(
                 200,
                 [
@@ -121,7 +106,6 @@ class ProjectRealtimeEditorService
             );
         });
     }
-
     /**
      * @param array<string, mixed> $data
      */
@@ -132,7 +116,6 @@ class ProjectRealtimeEditorService
         $seedContent = array_key_exists('seed_content', $data)
             ? $this->truncateEditorContent((string) ($data['seed_content'] ?? ''))
             : null;
-
         if (! $canWriteProject) {
             if ($reset) {
                 return new ProjectRealtimeResult(
@@ -140,7 +123,6 @@ class ProjectRealtimeEditorService
                     ['message' => 'Access denied.']
                 );
             }
-
             $snapshot = $this->readEditorStateSnapshot($projectId, $path);
             if ($snapshot !== null) {
                 return new ProjectRealtimeResult(
@@ -153,7 +135,6 @@ class ProjectRealtimeEditorService
                     ]
                 );
             }
-
             return new ProjectRealtimeResult(
                 200,
                 [
@@ -164,7 +145,6 @@ class ProjectRealtimeEditorService
                 ]
             );
         }
-
         if (! $reset && $seedContent === null) {
             $snapshot = $this->readEditorStateSnapshot($projectId, $path);
 
@@ -180,7 +160,6 @@ class ProjectRealtimeEditorService
                 );
             }
         }
-
         return $this->withEditorLock($projectId, $path, function () use (
             $projectId,
             $path,
@@ -194,9 +173,7 @@ class ProjectRealtimeEditorService
             } else {
                 $state = $this->normalizeEditorState($path, $state);
             }
-
             $this->storeEditorState($projectId, $path, $state);
-
             return new ProjectRealtimeResult(
                 200,
                 [
@@ -208,7 +185,6 @@ class ProjectRealtimeEditorService
             );
         });
     }
-
     /**
      * @param callable(): ProjectRealtimeResult $callback
      */
@@ -219,7 +195,6 @@ class ProjectRealtimeEditorService
             ProjectRealtimeLimits::EDITOR_LOCK_TTL_SECONDS
         );
         $acquired = false;
-
         try {
             $acquired = (bool) $lock->get();
             if (! $acquired) {
@@ -228,7 +203,6 @@ class ProjectRealtimeEditorService
                     ['message' => 'Editor sync is busy, please retry.']
                 );
             }
-
             return $callback();
         } catch (\Throwable) {
             return new ProjectRealtimeResult(
@@ -245,7 +219,6 @@ class ProjectRealtimeEditorService
             }
         }
     }
-
     /**
      * @param array<string, mixed> $operation
      * @return array<string, mixed>
@@ -258,7 +231,6 @@ class ProjectRealtimeEditorService
             'insert_text' => (string) ($operation['insert_text'] ?? ''),
         ];
     }
-
     /**
      * @param array<string, mixed> $operation
      * @return array<string, mixed>
@@ -278,7 +250,6 @@ class ProjectRealtimeEditorService
             'insert_text' => $insertText,
         ];
     }
-
     /**
      * @param array<string, mixed> $operation
      */
@@ -288,21 +259,16 @@ class ProjectRealtimeEditorService
         $deleteCount = max(0, (int) ($operation['delete_count'] ?? 0));
         $insertText = (string) ($operation['insert_text'] ?? '');
         $contentLength = $this->textLength($content);
-
         if ($start > $contentLength) {
             $start = $contentLength;
         }
-
         if ($deleteCount > ($contentLength - $start)) {
             $deleteCount = $contentLength - $start;
         }
-
         $prefix = $this->textSlice($content, 0, $start);
         $suffix = $this->textSlice($content, $start + $deleteCount);
-
         return $prefix.$insertText.$suffix;
     }
-
     /**
      * @param array<mixed> $history
      * @return array<int, array<string, mixed>>
@@ -310,20 +276,16 @@ class ProjectRealtimeEditorService
     private function normalizeEditorHistory(array $history): array
     {
         $normalized = [];
-
         foreach ($history as $entry) {
             if (! is_array($entry)) {
                 continue;
             }
-
             $operationRaw = $entry['operation'] ?? null;
             if (! is_array($operationRaw)) {
                 continue;
             }
-
             $operation = $this->normalizeEditorOperationShape($operationRaw);
             $operation['insert_text'] = $this->truncateEditorInsert((string) $operation['insert_text']);
-
             $normalized[] = [
                 'revision' => max(0, (int) ($entry['revision'] ?? 0)),
                 'path' => (string) ($entry['path'] ?? ''),
@@ -336,14 +298,11 @@ class ProjectRealtimeEditorService
                 'created_at' => (string) ($entry['created_at'] ?? ''),
             ];
         }
-
         usort($normalized, function (array $left, array $right): int {
             return (int) ($left['revision'] ?? 0) <=> (int) ($right['revision'] ?? 0);
         });
-
         return array_values($normalized);
     }
-
     /**
      * @param array<int, array<string, mixed>> $history
      * @return array<int, array<string, mixed>>
@@ -354,7 +313,6 @@ class ProjectRealtimeEditorService
             return (int) ($entry['revision'] ?? 0) > $revision;
         }));
     }
-
     /**
      * @param array<string, mixed> $state
      * @return array<string, mixed>
@@ -372,11 +330,9 @@ class ProjectRealtimeEditorService
             'updated_at' => (string) ($state['updated_at'] ?? now()->toISOString()),
         ];
     }
-
     /**
      * @return array<string, mixed>
-     */
-    private function createEditorState(string $path, string $content): array
+     */    private function createEditorState(string $path, string $content): array
     {
         return [
             'path' => $path,
@@ -386,7 +342,6 @@ class ProjectRealtimeEditorService
             'updated_at' => now()->toISOString(),
         ];
     }
-
     /**
      * @return array<string, mixed>|null
      */
@@ -396,7 +351,6 @@ class ProjectRealtimeEditorService
         if (! is_array($state)) {
             return null;
         }
-
         return [
             'path' => $path,
             'revision' => max(0, (int) ($state['revision'] ?? 0)),
@@ -404,7 +358,6 @@ class ProjectRealtimeEditorService
             'updated_at' => (string) ($state['updated_at'] ?? now()->toISOString()),
         ];
     }
-
     /**
      * @return array<string, mixed>|null
      */
@@ -414,10 +367,8 @@ class ProjectRealtimeEditorService
         if (! is_array($state)) {
             return null;
         }
-
         return $this->normalizeEditorState($path, $state);
     }
-
     /**
      * @param array<string, mixed> $state
      */
@@ -429,17 +380,14 @@ class ProjectRealtimeEditorService
             now()->addSeconds(ProjectRealtimeLimits::EDITOR_STATE_TTL_SECONDS)
         );
     }
-
     private function editorDocKey(int $projectId, string $path): string
     {
         return 'project:'.$projectId.':realtime:editor:doc:'.sha1($path);
     }
-
     private function editorDocLockKey(int $projectId, string $path): string
     {
         return 'project:'.$projectId.':realtime:editor:doc:lock:'.sha1($path);
     }
-
     private function normalizeEditorClientId(User $user, string $clientId): string
     {
         $normalized = strtolower(trim($clientId));
@@ -456,16 +404,13 @@ class ProjectRealtimeEditorService
 
         return 'u'.((int) $user->user_id).':'.$normalized;
     }
-
     private function truncateEditorInsert(string $value): string
     {
         if ($this->textLength($value) <= ProjectRealtimeLimits::EDITOR_MAX_INSERT_LENGTH) {
             return $value;
         }
-
         return $this->textSlice($value, 0, ProjectRealtimeLimits::EDITOR_MAX_INSERT_LENGTH);
     }
-
     private function truncateEditorContent(string $value): string
     {
         if ($this->textLength($value) <= ProjectRealtimeLimits::EDITOR_MAX_CONTENT_LENGTH) {
@@ -474,16 +419,13 @@ class ProjectRealtimeEditorService
 
         return $this->textSlice($value, 0, ProjectRealtimeLimits::EDITOR_MAX_CONTENT_LENGTH);
     }
-
     private function textLength(string $value): int
     {
         if (function_exists('mb_strlen')) {
             return (int) mb_strlen($value, 'UTF-8');
         }
-
         return strlen($value);
     }
-
     private function textSlice(string $value, int $start, ?int $length = null): string
     {
         if (function_exists('mb_substr')) {
@@ -493,11 +435,9 @@ class ProjectRealtimeEditorService
 
             return (string) mb_substr($value, $start, $length, 'UTF-8');
         }
-
         if ($length === null) {
             return substr($value, $start);
         }
-
         return substr($value, $start, $length);
     }
 }

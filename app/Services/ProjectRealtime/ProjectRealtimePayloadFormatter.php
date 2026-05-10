@@ -1,9 +1,6 @@
 <?php
-
 namespace App\Services\ProjectRealtime;
-
 use App\Models\User;
-
 class ProjectRealtimePayloadFormatter
 {
     public function userDisplayName(User $user): string
@@ -20,14 +17,12 @@ class ProjectRealtimePayloadFormatter
 
         return 'User #'.$user->user_id;
     }
-
     public function normalizeAvatarPreset(?string $avatarPreset): string
     {
         $value = trim((string) ($avatarPreset ?? ''));
 
         return $value !== '' ? $value : ProjectRealtimeLimits::DEFAULT_AVATAR_PRESET;
     }
-
     public function resolveAvatarUrl(User $user): ?string
     {
         if ((string) $user->avatar_type !== 'upload') {
@@ -41,7 +36,6 @@ class ProjectRealtimePayloadFormatter
 
         return '/storage/'.ltrim($path, '/');
     }
-
     /**
      * @param array<string, array<string, mixed>> $entries
      * @return array<int, array<string, mixed>>
@@ -64,7 +58,6 @@ class ProjectRealtimePayloadFormatter
 
         return array_values($list);
     }
-
     /**
      * @param array<string, mixed> $entry
      * @return array<string, mixed>
@@ -90,7 +83,6 @@ class ProjectRealtimePayloadFormatter
             'seen_at' => (int) ($entry['seen_at'] ?? 0),
         ];
     }
-
     /**
      * @param array<string, mixed> $entry
      * @return array<string, mixed>
@@ -115,7 +107,6 @@ class ProjectRealtimePayloadFormatter
             'updated_at' => $updatedAt !== '' ? $updatedAt : null,
         ];
     }
-
     /**
      * @param array<string, mixed> $entry
      */

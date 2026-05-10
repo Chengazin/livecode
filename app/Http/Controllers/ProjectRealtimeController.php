@@ -1,7 +1,5 @@
 <?php
-
 namespace App\Http\Controllers;
-
 use App\Events\ProjectRealtimeEvent;
 use App\Models\Project;
 use App\Models\User;
@@ -13,7 +11,6 @@ use App\Services\ProjectRealtime\ProjectRealtimeResult;
 use App\Support\ProjectRealtime\ProjectRealtimeValidation;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-
 class ProjectRealtimeController extends Controller
 {
     public function heartbeat(
@@ -23,22 +20,17 @@ class ProjectRealtimeController extends Controller
         ProjectRealtimePresenceService $presenceService
     ): JsonResponse {
         $user = $request->user();
-
         if (! $user) {
             return response()->json(['message' => 'Unauthorized.'], 401);
         }
-
         $project = $this->resolveProject($projectId, $user, $access, false);
         if ($project instanceof JsonResponse) {
             return $project;
         }
-
         $data = $request->validate(ProjectRealtimeValidation::heartbeatRules());
         $result = $presenceService->heartbeat($project->project_id, $user, $data);
-
         return $this->respondWithResult($project, (int) $user->user_id, $result);
     }
-
     public function presence(
         Request $request,
         int $projectId,
@@ -46,18 +38,14 @@ class ProjectRealtimeController extends Controller
         ProjectRealtimePresenceService $presenceService
     ): JsonResponse {
         $user = $request->user();
-
         if (! $user) {
             return response()->json(['message' => 'Unauthorized.'], 401);
         }
-
         $project = $this->resolveProject($projectId, $user, $access, false);
         if ($project instanceof JsonResponse) {
             return $project;
         }
-
         $result = $presenceService->presence($project->project_id, (int) $user->user_id);
-
         return $this->respondWithResult($project, (int) $user->user_id, $result);
     }
 
@@ -68,23 +56,17 @@ class ProjectRealtimeController extends Controller
         ProjectRealtimeChatService $chatService
     ): JsonResponse {
         $user = $request->user();
-
         if (! $user) {
             return response()->json(['message' => 'Unauthorized.'], 401);
         }
-
         $project = $this->resolveProject($projectId, $user, $access, false);
         if ($project instanceof JsonResponse) {
             return $project;
         }
-
         $data = $request->validate(ProjectRealtimeValidation::chatIndexRules());
-
         $afterId = (int) ($data['after_id'] ?? 0);
         $limit = (int) ($data['limit'] ?? 50);
-
         $result = $chatService->index($project->project_id, $afterId, $limit);
-
         return $this->respondWithResult($project, (int) $user->user_id, $result);
     }
 
@@ -95,19 +77,15 @@ class ProjectRealtimeController extends Controller
         ProjectRealtimeChatService $chatService
     ): JsonResponse {
         $user = $request->user();
-
         if (! $user) {
             return response()->json(['message' => 'Unauthorized.'], 401);
         }
-
         $project = $this->resolveProject($projectId, $user, $access, false);
         if ($project instanceof JsonResponse) {
             return $project;
         }
-
         $data = $request->validate(ProjectRealtimeValidation::chatStoreRules());
         $result = $chatService->store($project->project_id, $user, (string) $data['message']);
-
         return $this->respondWithResult($project, (int) $user->user_id, $result);
     }
 
@@ -119,16 +97,13 @@ class ProjectRealtimeController extends Controller
         ProjectRealtimeChatService $chatService
     ): JsonResponse {
         $user = $request->user();
-
         if (! $user) {
             return response()->json(['message' => 'Unauthorized.'], 401);
         }
-
         $project = $this->resolveProject($projectId, $user, $access, false);
         if ($project instanceof JsonResponse) {
             return $project;
         }
-
         $data = $request->validate(ProjectRealtimeValidation::chatStoreRules());
         $result = $chatService->update(
             $project->project_id,
@@ -136,7 +111,6 @@ class ProjectRealtimeController extends Controller
             $user,
             (string) $data['message']
         );
-
         return $this->respondWithResult($project, (int) $user->user_id, $result);
     }
 
@@ -148,18 +122,14 @@ class ProjectRealtimeController extends Controller
         ProjectRealtimeChatService $chatService
     ): JsonResponse {
         $user = $request->user();
-
         if (! $user) {
             return response()->json(['message' => 'Unauthorized.'], 401);
         }
-
         $project = $this->resolveProject($projectId, $user, $access, false);
         if ($project instanceof JsonResponse) {
             return $project;
         }
-
         $result = $chatService->destroy($project->project_id, $messageId, $user);
-
         return $this->respondWithResult($project, (int) $user->user_id, $result);
     }
 
@@ -170,19 +140,15 @@ class ProjectRealtimeController extends Controller
         ProjectRealtimeEditorService $editorService
     ): JsonResponse {
         $user = $request->user();
-
         if (! $user) {
             return response()->json(['message' => 'Unauthorized.'], 401);
         }
-
         $project = $this->resolveProject($projectId, $user, $access, true);
         if ($project instanceof JsonResponse) {
             return $project;
         }
-
         $data = $request->validate(ProjectRealtimeValidation::editorSyncRules());
         $result = $editorService->sync($project->project_id, $user, $data);
-
         return $this->respondWithResult($project, (int) $user->user_id, $result);
     }
 
@@ -193,21 +159,16 @@ class ProjectRealtimeController extends Controller
         ProjectRealtimeEditorService $editorService
     ): JsonResponse {
         $user = $request->user();
-
         if (! $user) {
             return response()->json(['message' => 'Unauthorized.'], 401);
         }
-
         $project = $this->resolveProject($projectId, $user, $access, false);
         if ($project instanceof JsonResponse) {
             return $project;
         }
-
         $canWriteProject = $access->canWriteProject($project, $user);
-
         $data = $request->validate(ProjectRealtimeValidation::editorStateRules());
         $result = $editorService->state($project->project_id, $canWriteProject, $data);
-
         return $this->respondWithResult($project, (int) $user->user_id, $result);
     }
 
@@ -218,15 +179,12 @@ class ProjectRealtimeController extends Controller
         bool $requiresWrite
     ): Project|JsonResponse {
         $project = Project::query()->findOrFail($projectId);
-
         $hasAccess = $requiresWrite
             ? $access->canWriteProject($project, $user)
             : $access->userHasAccess($project, $user);
-
         if (! $hasAccess) {
             return response()->json(['message' => 'Access denied.'], 403);
         }
-
         return $project;
     }
 
@@ -243,7 +201,6 @@ class ProjectRealtimeController extends Controller
                 $result->eventPayload
             ));
         }
-
         return response()->json($result->body, $result->status);
     }
 

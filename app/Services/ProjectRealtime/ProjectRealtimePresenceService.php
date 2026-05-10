@@ -1,19 +1,15 @@
 <?php
-
 namespace App\Services\ProjectRealtime;
-
 use App\Models\User;
 use Illuminate\Contracts\Cache\LockProvider;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Cache;
-
 class ProjectRealtimePresenceService
 {
     public function __construct(
         private readonly ProjectRealtimePayloadFormatter $formatter
     ) {
     }
-
     /**
      * @param array<string, mixed> $data
      */
@@ -29,7 +25,6 @@ class ProjectRealtimePresenceService
                     if (! is_array($entries)) {
                         $entries = [];
                     }
-
                     $entries[(string) $user->user_id] = [
                         'user_id' => (int) $user->user_id,
                         'name' => $this->formatter->userDisplayName($user),
@@ -44,17 +39,13 @@ class ProjectRealtimePresenceService
                         'selection_end_column' => array_key_exists('selection_end_column', $data) ? $data['selection_end_column'] : null,
                         'seen_at' => now()->timestamp,
                     ];
-
                     $entries = $this->prunePresence($entries);
-
                     Cache::put(
                         $key,
                         $entries,
                         now()->addSeconds(ProjectRealtimeLimits::PRESENCE_TTL_SECONDS + 5)
                     );
-
                     $current = $entries[(string) $user->user_id] ?? null;
-
                     return [$entries, is_array($current) ? $current : null];
                 }
             );
@@ -64,7 +55,6 @@ class ProjectRealtimePresenceService
                 ['message' => 'Realtime presence is busy, please retry.']
             );
         }
-
         if (is_array($current)) {
             return new ProjectRealtimeResult(
                 200,
@@ -76,7 +66,6 @@ class ProjectRealtimePresenceService
                 ['peer' => $this->formatter->formatPresenceEntry($current)]
             );
         }
-
         return new ProjectRealtimeResult(
             200,
             [
@@ -85,16 +74,13 @@ class ProjectRealtimePresenceService
             ]
         );
     }
-
     public function presence(int $projectId, int $currentUserId): ProjectRealtimeResult
     {
         $entries = Cache::get($this->presenceKey($projectId), []);
         if (! is_array($entries)) {
             $entries = [];
         }
-
         $entries = $this->prunePresence($entries);
-
         return new ProjectRealtimeResult(
             200,
             [
@@ -103,12 +89,10 @@ class ProjectRealtimePresenceService
             ]
         );
     }
-
     /**
      * @param array<string, array<string, mixed>> $entries
      * @return array<string, array<string, mixed>>
-     */
-    private function prunePresence(array $entries): array
+     */    private function prunePresence(array $entries): array
     {
         $threshold = now()->timestamp - ProjectRealtimeLimits::PRESENCE_TTL_SECONDS;
 
@@ -116,17 +100,14 @@ class ProjectRealtimePresenceService
             return (int) ($entry['seen_at'] ?? 0) >= $threshold;
         });
     }
-
     private function presenceKey(int $projectId): string
     {
         return 'project:'.$projectId.':realtime:presence';
     }
-
     private function presenceLockKey(int $projectId): string
     {
         return 'project:'.$projectId.':realtime:presence:lock';
     }
-
     /**
      * @template TResult
      *

@@ -9,6 +9,11 @@ use Illuminate\Support\Facades\Log;
 class NotificationService
 {
     /**
+     * @var array<int, string>
+     */
+    private static array $localeCache = [];
+
+    /**
      * Send a notification to a user
      *
      * @param int $userId
@@ -46,6 +51,28 @@ class NotificationService
     }
 
     /**
+     * Send localized notification to a user.
+     */
+    public static function sendLocalizedNotification(
+        int $userId,
+        string $type,
+        string $titleKey,
+        string $messageKey,
+        array $replace = [],
+        array $data = []
+    ): Notification {
+        $locale = self::resolveLocaleForUser($userId);
+
+        return self::sendNotification(
+            userId: $userId,
+            type: $type,
+            title: self::translateWithLocale($titleKey, $replace, $locale),
+            message: self::translateWithLocale($messageKey, $replace, $locale),
+            data: $data
+        );
+    }
+
+    /**
      * Send invitation received notification
      */
     public static function notifyInvitationReceived(
@@ -57,11 +84,15 @@ class NotificationService
         $sender = User::find($senderUserId);
         $senderName = $sender?->name ?? 'Someone';
 
-        return self::sendNotification(
+        return self::sendLocalizedNotification(
             userId: $recipientUserId,
             type: Notification::TYPE_INVITATION_RECEIVED,
-            title: 'Project Invitation',
-            message: "{$senderName} invited you to join the project \"{$projectName}\"",
+            titleKey: 'notifications.templates.invitation_received.title',
+            messageKey: 'notifications.templates.invitation_received.message',
+            replace: [
+                'sender' => $senderName,
+                'project' => $projectName,
+            ],
             data: [
                 'project_id' => $projectId,
                 'project_name' => $projectName,
@@ -83,11 +114,15 @@ class NotificationService
         $acceptingUser = User::find($acceptingUserId);
         $userName = $acceptingUser?->name ?? 'Someone';
 
-        return self::sendNotification(
+        return self::sendLocalizedNotification(
             userId: $projectOwnerId,
             type: Notification::TYPE_INVITATION_ACCEPTED,
-            title: 'Invitation Accepted',
-            message: "{$userName} accepted your invitation to \"{$projectName}\"",
+            titleKey: 'notifications.templates.invitation_accepted.title',
+            messageKey: 'notifications.templates.invitation_accepted.message',
+            replace: [
+                'user' => $userName,
+                'project' => $projectName,
+            ],
             data: [
                 'project_id' => $projectId,
                 'project_name' => $projectName,
@@ -109,11 +144,15 @@ class NotificationService
         $decliningUser = User::find($decliningUserId);
         $userName = $decliningUser?->name ?? 'Someone';
 
-        return self::sendNotification(
+        return self::sendLocalizedNotification(
             userId: $projectOwnerId,
             type: Notification::TYPE_INVITATION_DECLINED,
-            title: 'Invitation Declined',
-            message: "{$userName} declined your invitation to \"{$projectName}\"",
+            titleKey: 'notifications.templates.invitation_declined.title',
+            messageKey: 'notifications.templates.invitation_declined.message',
+            replace: [
+                'user' => $userName,
+                'project' => $projectName,
+            ],
             data: [
                 'project_id' => $projectId,
                 'project_name' => $projectName,
@@ -135,12 +174,18 @@ class NotificationService
     ): Notification {
         $addedByUser = User::find($addedByUserId);
         $addedByName = $addedByUser?->name ?? 'Owner';
+        $locale = self::resolveLocaleForUser($newParticipantUserId);
+        $roleLabel = self::translateRoleWithLocale($role, $locale);
 
         return self::sendNotification(
             userId: $newParticipantUserId,
             type: Notification::TYPE_PARTICIPANT_ADDED,
-            title: 'Added to Project',
-            message: "{$addedByName} added you to \"{$projectName}\" as {$role}",
+            title: self::translateWithLocale('notifications.templates.participant_added.title', [], $locale),
+            message: self::translateWithLocale('notifications.templates.participant_added.message', [
+                'actor' => $addedByName,
+                'project' => $projectName,
+                'role' => $roleLabel,
+            ], $locale),
             data: [
                 'project_id' => $projectId,
                 'project_name' => $projectName,
@@ -163,11 +208,15 @@ class NotificationService
         $removedByUser = User::find($removedByUserId);
         $removedByName = $removedByUser?->name ?? 'Owner';
 
-        return self::sendNotification(
+        return self::sendLocalizedNotification(
             userId: $removedUserId,
             type: Notification::TYPE_PARTICIPANT_REMOVED,
-            title: 'Removed from Project',
-            message: "{$removedByName} removed you from \"{$projectName}\"",
+            titleKey: 'notifications.templates.participant_removed.title',
+            messageKey: 'notifications.templates.participant_removed.message',
+            replace: [
+                'actor' => $removedByName,
+                'project' => $projectName,
+            ],
             data: [
                 'project_id' => $projectId,
                 'project_name' => $projectName,
@@ -190,12 +239,18 @@ class NotificationService
     ): Notification {
         $changedByUser = User::find($changedByUserId);
         $changedByName = $changedByUser?->name ?? 'Owner';
+        $locale = self::resolveLocaleForUser($userWhoseRoleChanged);
 
         return self::sendNotification(
             userId: $userWhoseRoleChanged,
             type: Notification::TYPE_ROLE_CHANGED,
-            title: 'Role Changed',
-            message: "{$changedByName} changed your role in \"{$projectName}\" from {$oldRole} to {$newRole}",
+            title: self::translateWithLocale('notifications.templates.role_changed.title', [], $locale),
+            message: self::translateWithLocale('notifications.templates.role_changed.message', [
+                'actor' => $changedByName,
+                'project' => $projectName,
+                'old_role' => self::translateRoleWithLocale($oldRole, $locale),
+                'new_role' => self::translateRoleWithLocale($newRole, $locale),
+            ], $locale),
             data: [
                 'project_id' => $projectId,
                 'project_name' => $projectName,
@@ -270,5 +325,58 @@ class NotificationService
                 'is_read' => true,
                 'read_at' => now(),
             ]);
+    }
+
+    private static function resolveLocaleForUser(int $userId): string
+    {
+        if (array_key_exists($userId, self::$localeCache)) {
+            return self::$localeCache[$userId];
+        }
+
+        $language = trim(strtolower((string) User::query()
+            ->where('user_id', $userId)
+            ->value('language')));
+
+        $locale = match ($language) {
+            'rus', 'ru' => 'ru',
+            'eng', 'en' => 'en',
+            default => 'en',
+        };
+
+        self::$localeCache[$userId] = $locale;
+
+        return $locale;
+    }
+
+    private static function translateWithLocale(string $key, array $replace, string $locale): string
+    {
+        $translated = trans($key, $replace, $locale);
+        if (is_string($translated) && $translated !== '' && $translated !== $key) {
+            return $translated;
+        }
+
+        $fallback = trans($key, $replace, 'en');
+        if (is_string($fallback) && $fallback !== '' && $fallback !== $key) {
+            return $fallback;
+        }
+
+        return $key;
+    }
+
+    private static function translateRoleWithLocale(string $role, string $locale): string
+    {
+        $normalized = trim(strtolower($role));
+        if ($normalized === '') {
+            return $role;
+        }
+
+        $roleKey = 'notifications.roles.'.$normalized;
+        $translated = trans($roleKey, [], $locale);
+
+        if (is_string($translated) && $translated !== '' && $translated !== $roleKey) {
+            return $translated;
+        }
+
+        return $role;
     }
 }

@@ -46,6 +46,64 @@
       </nav>
 
       <div class="session-meta">
+        <div v-if="isAuthenticated" ref="notificationsRef" class="notifications-shell">
+          <button
+            type="button"
+            class="notification-toggle"
+            :class="{ 'is-open': notificationsOpen }"
+            :title="t('nav.notificationsOpen')"
+            :aria-label="t('nav.notificationsOpen')"
+            :aria-expanded="notificationsOpen ? 'true' : 'false'"
+            @click="toggleNotifications"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 4.5a5.5 5.5 0 0 0-5.5 5.5v2.8c0 .8-.28 1.58-.8 2.2l-1.2 1.45h14.9l-1.2-1.45a3.4 3.4 0 0 1-.8-2.2V10A5.5 5.5 0 0 0 12 4.5Z" />
+              <path d="M9.5 17.5a2.5 2.5 0 0 0 5 0" />
+            </svg>
+            <span v-if="unreadNotificationCount > 0" class="notification-badge">
+              {{ notificationBadgeText }}
+            </span>
+          </button>
+
+          <div v-if="notificationsOpen" class="notifications-popover" role="dialog" aria-live="polite">
+            <div class="notifications-head">
+              <p class="notifications-title">{{ t("nav.notifications") }}</p>
+              <button
+                v-if="hasUnreadNotifications"
+                type="button"
+                class="notifications-mark-all"
+                :disabled="notificationsLoading"
+                @click="markAllAsRead"
+              >
+                {{ t("nav.notificationsMarkAllRead") }}
+              </button>
+            </div>
+
+            <p v-if="notificationsLoading" class="notifications-state">
+              {{ t("nav.notificationsLoading") }}
+            </p>
+            <p v-else-if="notifications.length === 0" class="notifications-state">
+              {{ t("nav.notificationsEmpty") }}
+            </p>
+            <ul v-else class="notifications-list">
+              <li v-for="notification in notifications" :key="notification.notificationId">
+                <button
+                  type="button"
+                  class="notification-item"
+                  :class="{ 'is-unread': !notification.isRead }"
+                  @click="handleNotificationSelect(notification)"
+                >
+                  <span class="notification-item-head">
+                    <strong class="notification-item-title">{{ notification.title }}</strong>
+                    <span class="notification-item-time">{{ formatNotificationTime(notification.createdAt) }}</span>
+                  </span>
+                  <span v-if="notification.message" class="notification-item-message">{{ notification.message }}</span>
+                </button>
+              </li>
+            </ul>
+          </div>
+        </div>
+
         <RouterLink
           v-if="isAuthenticated"
           to="/profile"
@@ -74,12 +132,18 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { clearSession, getSession, setUser } from "./services/auth";
 import { request } from "./services/api";
 import { avatarPresetStyles, defaultAvatarPreset } from "./config/avatarPresets";
+import {
+  fetchNotifications,
+  fetchUnreadNotificationsCount,
+  markAllNotificationsRead,
+  markNotificationRead,
+} from "./services/notifications";
 
 const route = useRoute();
 const router = useRouter();
@@ -88,6 +152,13 @@ const { t } = useI18n();
 const session = ref(getSession());
 const loadingProfile = ref(false);
 const statusMessage = ref("");
+const notificationsRef = ref(null);
+const notificationsOpen = ref(false);
+const notificationsLoading = ref(false);
+const notifications = ref([]);
+const unreadNotificationCount = ref(0);
+
+let notificationsPollTimer = null;
 
 function hasAdminRole(user) {
   if (!user || typeof user !== "object") {
@@ -120,6 +191,14 @@ const avatarPresetStyle = computed(() => {
   const key = session.value.user?.avatar_preset || defaultAvatarPreset;
   return avatarPresetStyles[key] || avatarPresetStyles[defaultAvatarPreset];
 });
+const hasUnreadNotifications = computed(() => unreadNotificationCount.value > 0);
+const notificationBadgeText = computed(() => {
+  if (unreadNotificationCount.value > 99) {
+    return "99+";
+  }
+
+  return String(unreadNotificationCount.value);
+});
 
 function isRouteActive(path) {
   if (path === "/admin") {
@@ -131,6 +210,196 @@ function isRouteActive(path) {
   }
 
   return route.path === path;
+}
+
+function normalizeNotification(entry) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+
+  const notificationId = Number(entry.notification_id || 0);
+  if (!Number.isFinite(notificationId) || notificationId <= 0) {
+    return null;
+  }
+
+  const data = entry.data && typeof entry.data === "object" ? entry.data : {};
+
+  return {
+    notificationId,
+    title: String(entry.title || t("nav.notificationDefaultTitle")),
+    message: String(entry.message || ""),
+    createdAt: String(entry.created_at || ""),
+    isRead: Boolean(entry.is_read),
+    data,
+  };
+}
+
+function formatNotificationTime(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return date.toLocaleString();
+}
+
+function resolveNotificationProjectId(notification) {
+  const projectId = Number(notification?.data?.project_id || 0);
+
+  if (!Number.isFinite(projectId) || projectId <= 0) {
+    return null;
+  }
+
+  return projectId;
+}
+
+function stopNotificationsPolling() {
+  if (notificationsPollTimer !== null) {
+    window.clearInterval(notificationsPollTimer);
+    notificationsPollTimer = null;
+  }
+}
+
+function resetNotificationsState() {
+  notificationsOpen.value = false;
+  notificationsLoading.value = false;
+  notifications.value = [];
+  unreadNotificationCount.value = 0;
+}
+
+async function loadUnreadNotificationsCount() {
+  if (!session.value.accessToken) {
+    return;
+  }
+
+  try {
+    const response = await fetchUnreadNotificationsCount();
+    const unreadCount = Number(response?.data?.unread_count || 0);
+    unreadNotificationCount.value = Number.isFinite(unreadCount) && unreadCount > 0 ? unreadCount : 0;
+  } catch (_error) {
+    // Ignore notification counter errors to keep topbar responsive.
+  }
+}
+
+async function loadNotifications() {
+  if (!session.value.accessToken || notificationsLoading.value) {
+    return;
+  }
+
+  notificationsLoading.value = true;
+
+  try {
+    const response = await fetchNotifications({ perPage: 10 });
+    const rows = Array.isArray(response?.data?.data) ? response.data.data : [];
+    notifications.value = rows
+      .map((entry) => normalizeNotification(entry))
+      .filter((entry) => entry !== null);
+  } catch (_error) {
+    notifications.value = [];
+  } finally {
+    notificationsLoading.value = false;
+  }
+}
+
+function startNotificationsPolling() {
+  stopNotificationsPolling();
+
+  if (!session.value.accessToken) {
+    return;
+  }
+
+  notificationsPollTimer = window.setInterval(() => {
+    void loadUnreadNotificationsCount();
+
+    if (notificationsOpen.value) {
+      void loadNotifications();
+    }
+  }, 30000);
+}
+
+async function toggleNotifications() {
+  if (!isAuthenticated.value) {
+    return;
+  }
+
+  if (notificationsOpen.value) {
+    notificationsOpen.value = false;
+    return;
+  }
+
+  notificationsOpen.value = true;
+  await Promise.all([
+    loadUnreadNotificationsCount(),
+    loadNotifications(),
+  ]);
+}
+
+async function markAsRead(notification) {
+  if (!notification || notification.isRead) {
+    return;
+  }
+
+  notification.isRead = true;
+  unreadNotificationCount.value = Math.max(0, unreadNotificationCount.value - 1);
+
+  try {
+    await markNotificationRead(notification.notificationId);
+  } catch (_error) {
+    notification.isRead = false;
+    unreadNotificationCount.value += 1;
+  }
+}
+
+async function markAllAsRead() {
+  if (!hasUnreadNotifications.value) {
+    return;
+  }
+
+  try {
+    await markAllNotificationsRead();
+  } catch (_error) {
+    // Ignore and fallback to refresh.
+  } finally {
+    await Promise.all([
+      loadUnreadNotificationsCount(),
+      loadNotifications(),
+    ]);
+  }
+}
+
+async function handleNotificationSelect(notification) {
+  await markAsRead(notification);
+  notificationsOpen.value = false;
+
+  const projectId = resolveNotificationProjectId(notification);
+  if (projectId !== null) {
+    router.push(`/projects/${projectId}/info`);
+    return;
+  }
+
+  router.push("/profile");
+}
+
+function handleGlobalPointerDown(event) {
+  if (!notificationsOpen.value || !notificationsRef.value) {
+    return;
+  }
+
+  const target = event.target;
+  if (target instanceof Node && !notificationsRef.value.contains(target)) {
+    notificationsOpen.value = false;
+  }
+}
+
+function handleGlobalKeydown(event) {
+  if (event.key === "Escape") {
+    notificationsOpen.value = false;
+  }
 }
 
 async function refreshProfile() {
@@ -166,15 +435,33 @@ function handleAuthChanged() {
 
   if (session.value.accessToken) {
     void refreshProfile();
+    void loadUnreadNotificationsCount();
+    startNotificationsPolling();
+    return;
   }
+
+  stopNotificationsPolling();
+  resetNotificationsState();
 }
 
 onMounted(() => {
   window.addEventListener("auth-changed", handleAuthChanged);
+  document.addEventListener("pointerdown", handleGlobalPointerDown);
+  window.addEventListener("keydown", handleGlobalKeydown);
   handleAuthChanged();
 });
 
 onUnmounted(() => {
   window.removeEventListener("auth-changed", handleAuthChanged);
+  document.removeEventListener("pointerdown", handleGlobalPointerDown);
+  window.removeEventListener("keydown", handleGlobalKeydown);
+  stopNotificationsPolling();
 });
+
+watch(
+  () => route.fullPath,
+  () => {
+    notificationsOpen.value = false;
+  },
+);
 </script>

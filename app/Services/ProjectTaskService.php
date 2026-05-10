@@ -116,11 +116,14 @@ class ProjectTaskService
         $task->assignTo($userId);
 
         if ($previousAssignee !== 0 && $previousAssignee !== $userId) {
-            NotificationService::sendNotification(
+            NotificationService::sendLocalizedNotification(
                 userId: $previousAssignee,
                 type: 'task_unassigned',
-                title: 'Task Reassigned',
-                message: sprintf('Task "%s" has been reassigned', $task->title),
+                titleKey: 'notifications.templates.task_reassigned.title',
+                messageKey: 'notifications.templates.task_reassigned.message',
+                replace: [
+                    'task' => $task->title,
+                ],
                 data: [
                     'project_id' => $task->project_id,
                     'project_task_id' => $task->project_task_id,
@@ -130,11 +133,14 @@ class ProjectTaskService
         }
 
         if ($previousAssignee !== $userId) {
-            NotificationService::sendNotification(
+            NotificationService::sendLocalizedNotification(
                 userId: $userId,
                 type: 'task_assigned',
-                title: 'New Task Assigned',
-                message: sprintf('Task "%s" has been assigned to you', $task->title),
+                titleKey: 'notifications.templates.task_assigned.title',
+                messageKey: 'notifications.templates.task_assigned.message',
+                replace: [
+                    'task' => $task->title,
+                ],
                 data: [
                     'project_id' => $task->project_id,
                     'project_task_id' => $task->project_task_id,
@@ -207,11 +213,14 @@ class ProjectTaskService
         $task->markDone();
 
         // Notify task creator
-        NotificationService::sendNotification(
+        NotificationService::sendLocalizedNotification(
             userId: $task->created_by_user_id,
             type: 'task_completed',
-            title: 'Task Completed',
-            message: sprintf('Task "%s" has been completed', $task->title),
+            titleKey: 'notifications.templates.task_completed.title',
+            messageKey: 'notifications.templates.task_completed.message',
+            replace: [
+                'task' => $task->title,
+            ],
             data: [
                 'project_id' => $task->project_id,
                 'project_task_id' => $task->project_task_id,
@@ -242,11 +251,14 @@ class ProjectTaskService
         $task->reopen();
 
         // Notify task creator that task was reopened
-        NotificationService::sendNotification(
+        NotificationService::sendLocalizedNotification(
             userId: $task->created_by_user_id,
             type: 'task_reopened',
-            title: 'Task Reopened',
-            message: sprintf('Task "%s" has been reopened', $task->title),
+            titleKey: 'notifications.templates.task_reopened.title',
+            messageKey: 'notifications.templates.task_reopened.message',
+            replace: [
+                'task' => $task->title,
+            ],
             data: [
                 'project_id' => $task->project_id,
                 'project_task_id' => $task->project_task_id,
@@ -270,11 +282,14 @@ class ProjectTaskService
 
         // Notify the previously assigned user
         if ($previousAssignee) {
-            NotificationService::sendNotification(
+            NotificationService::sendLocalizedNotification(
                 userId: $previousAssignee,
                 type: 'task_unassigned',
-                title: 'Task Unassigned',
-                message: sprintf('Task "%s" has been unassigned from you', $task->title),
+                titleKey: 'notifications.templates.task_unassigned.title',
+                messageKey: 'notifications.templates.task_unassigned.message',
+                replace: [
+                    'task' => $task->title,
+                ],
                 data: [
                     'project_id' => $task->project_id,
                     'project_task_id' => $task->project_task_id,
