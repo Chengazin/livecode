@@ -8,13 +8,29 @@ yarn-error.log
 .DS_Store
 Thumbs.db
 
-# Laravel 4 specific
+# Laravel
 bootstrap/compiled.php
 app/storage/
-
-# Laravel 5 & Lumen specific
 /public/storage
 /public/hot
+public_html/storage
+public_html/hot
+/storage/*.key
+/storage/framework/cache/data/
+/storage/framework/sessions/
+/storage/framework/views/
+/storage/logs/*.log
+/public/build
+/storage/pail
+
+# Environment
+.env
+.env.backup
+.env.production
+.env.local
+.env.*.local
+frontend/.env
+frontend/.env.*.local
 
 # Services (native Docker replacement)
 services/**/bin/
@@ -22,26 +38,25 @@ services/**/data/
 services/**/*.log
 .dev-pids.json
 
-# Laravel 5 & Lumen specific with changed public path
-public_html/storage
-public_html/hot
+# Docker export (regeneratable binaries)
+docker-export/*.tar
+docker-export/*.tar.gz
 
-/storage/*.key
-.env
-.env.backup
-.env.production
-Homestead.yaml
-Homestead.json
-/.vagrant
-.phpunit.result.cache
-/.phpunit.cache
+# IDEs & editors
 /.fleet
 /.idea
 /.nova
 /.vscode
 /.zed
+/.phpactor.json
+Homestead.yaml
+Homestead.json
+
+# OS
+/.vagrant
 /auth.json
 
-/public/build
-/storage/pail
-.phpactor.json
+# PHP
+.phpunit.result.cache
+/.phpunit.cache
+.php_cs.cache

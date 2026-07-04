@@ -4,6 +4,12 @@ const backendTarget = process.env.VUE_APP_BACKEND_URL || "http://127.0.0.1:8000"
 
 module.exports = defineConfig({
   transpileDependencies: true,
+  pages: {
+    index: {
+      entry: "src/main.js",
+      title: "LiveCode",
+    },
+  },
   devServer: {
     proxy: {
       "^/api": {

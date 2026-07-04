@@ -17,10 +17,40 @@
     <aside class="card info-card">
       <h2>{{ t("home.whatsInsideTitle") }}</h2>
       <ul class="plain-list">
-        <li>{{ t("home.featureEditor") }}</li>
-        <li>{{ t("home.featureTerminal") }}</li>
-        <li>{{ t("home.featureGit") }}</li>
+        <li>
+          <strong>Browser Code Editor</strong>
+          <p class="home-feature-desc">{{ t("home.featureEditor") }}</p>
+        </li>
+        <li>
+          <strong>Real-time Collaboration</strong>
+          <p class="home-feature-desc">Operational Transformation, presence, chat — edit together in real time.</p>
+        </li>
+        <li>
+          <strong>In-browser Terminal</strong>
+          <p class="home-feature-desc">{{ t("home.featureTerminal") }}</p>
+        </li>
+        <li>
+          <strong>{{ t("home.featureGit") }}</strong>
+          <p class="home-feature-desc">Branch, commit, push, pull requests — all from within the editor.</p>
+        </li>
+        <li>
+          <strong>Task Kanban</strong>
+          <p class="home-feature-desc">Manage project tasks with a built-in Kanban workflow board.</p>
+        </li>
+        <li>
+          <strong>Code Annotations</strong>
+          <p class="home-feature-desc">Inline code comments for review and collaboration.</p>
+        </li>
       </ul>
+      <div class="home-tech-stack">
+        <span class="home-tech-chip">Laravel 12</span>
+        <span class="home-tech-chip">Vue 3</span>
+        <span class="home-tech-chip">PostgreSQL</span>
+        <span class="home-tech-chip">Redis</span>
+        <span class="home-tech-chip">WebSocket</span>
+        <span class="home-tech-chip">Docker</span>
+        <span class="home-tech-chip">Forgejo</span>
+      </div>
     </aside>
   </div>
 </template>
