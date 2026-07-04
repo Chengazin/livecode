@@ -60,3 +60,7 @@ Homestead.json
 .phpunit.result.cache
 /.phpunit.cache
 .php_cs.cache
+
+# Python
+__pycache__/
+*.pyc
