@@ -116,10 +116,6 @@ function mapIndexThroughOperation(indexInput, operationInput, preferAfterInsert 
       return index;
     }
 
-    if (index > start) {
-      return index + insertLength;
-    }
-
     return preferAfterInsert ? index + insertLength : index;
   }
 
@@ -161,7 +157,7 @@ export function transformTextOperation(operationInput = {}, againstOperationInpu
   const transformedEnd = mapIndexThroughOperation(
     operation.start + operation.delete_count,
     againstOperation,
-    true,
+    preferAfterAtSameInsert,
   );
   const transformedDeleteCount = Math.max(0, transformedEnd - transformedStart);
 

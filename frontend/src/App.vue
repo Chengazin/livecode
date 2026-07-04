@@ -43,6 +43,15 @@
         >
           {{ t("nav.login") }}
         </RouterLink>
+        <a
+          v-if="forgejoUrl"
+          :href="forgejoUrl"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="nav-link forgejo-link"
+        >
+          {{ t("nav.versionControl") }}
+        </a>
       </nav>
 
       <div class="session-meta">
@@ -111,10 +120,11 @@
           :title="t('nav.profileTitle', { name: userLabel })"
         >
           <img
-            v-if="avatarImageUrl"
+            v-if="avatarImageUrl && !avatarImgBroken"
             :src="avatarImageUrl"
             :alt="t('profile.avatarAlt')"
             class="profile-avatar-image"
+            @error="avatarImgBroken = true"
           />
           <span v-else class="profile-avatar-fallback" :style="{ background: avatarPresetStyle.background }">
             {{ avatarPresetStyle.symbol }}
@@ -159,6 +169,7 @@ const notifications = ref([]);
 const unreadNotificationCount = ref(0);
 
 let notificationsPollTimer = null;
+const avatarImgBroken = ref(false);
 
 function hasAdminRole(user) {
   if (!user || typeof user !== "object") {
@@ -186,6 +197,9 @@ const userLabel = computed(() => {
 });
 const avatarImageUrl = computed(() => {
   return session.value.user?.avatar_url || "";
+});
+const forgejoUrl = computed(() => {
+  return String(process.env.VUE_APP_FORGEJO_PUBLIC_URL || "").trim() || null;
 });
 const avatarPresetStyle = computed(() => {
   const key = session.value.user?.avatar_preset || defaultAvatarPreset;

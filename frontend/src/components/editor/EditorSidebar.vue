@@ -1,6 +1,6 @@
 ﻿<template>
   <div class="editor-sidebar-shell">
-    <nav class="editor-activity-bar" aria-label="Editor sidebar sections">
+    <nav class="editor-activity-bar" :aria-label="t('editor.sidebarNavLabel')">
       <button
         class="editor-activity-btn"
         :class="{ 'is-active': activePanel === 'explorer' }"
@@ -181,10 +181,11 @@
             <div v-for="participant in projectParticipants" :key="participant.participant_id" class="collaborator-row">
               <div class="collaborator-main">
                 <img
-                  v-if="resolveParticipantAvatarUrl(participant)"
+                  v-if="resolveParticipantAvatarUrl(participant) && !brokenParticipantAvatars[participant.participant_id]"
                   :src="resolveParticipantAvatarUrl(participant)"
                   :alt="t('profile.avatarAlt')"
                   class="mini-avatar-image"
+                  @error="brokenParticipantAvatars[participant.participant_id] = true"
                 />
                 <span
                   v-else
@@ -269,7 +270,7 @@
 
                 <label v-if="forgejoMode === 'create'" class="field field-row">
                   <span>{{ t("editor.repositoryName") }}</span>
-                  <input :value="forgejoRepoName" type="text" maxlength="255" placeholder="my-project" @input="emit('update:forgejoRepoName', $event.target.value)" />
+                  <input :value="forgejoRepoName" type="text" maxlength="255" :placeholder="t('editor.repositoryNamePlaceholder')" @input="emit('update:forgejoRepoName', $event.target.value)" />
                 </label>
 
                 <label v-if="forgejoMode === 'existing'" class="field">
@@ -525,6 +526,7 @@ function emit(eventName, ...args) {
 }
 
 const activePanel = ref("explorer");
+const brokenParticipantAvatars = ref({});
 const isContentVisible = computed(() => activePanel.value !== "");
 
 const availablePanels = computed(() => {
@@ -609,7 +611,8 @@ function resolveParticipantAvatarUrl(participant) {
     return "";
   }
 
-  return `/storage/${path.replace(/^\/+/, "")}`;
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  return `${origin}/storage/${path.replace(/^\/+/, "")}`;
 }
 
 function resolveParticipantAvatarStyle(participant) {

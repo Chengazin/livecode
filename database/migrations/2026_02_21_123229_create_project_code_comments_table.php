@@ -13,7 +13,7 @@ return new class extends Migration
             $table->id('comment_id');
             $table->foreignId('project_id')->constrained('projects', 'project_id')->cascadeOnDelete();
             $table->foreignId('author_user_id')->nullable()->constrained('users', 'user_id')->nullOnDelete();
-            $table->string('path', 2048);
+            $table->string('path', 191);
             $table->unsignedInteger('line_number');
             $table->text('body');
             $table->timestamp('created_at')->useCurrent();

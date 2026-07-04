@@ -487,7 +487,7 @@ function applySessionSelection() {
 }
 
 function formatSessionLabel(item) {
-  const name = String(item?.name || "Terminal");
+  const name = String(item?.name || t("editor.terminalDefaultName"));
   const isShared = Boolean(item?.shared);
 
   const visibility = isShared ? t("editor.terminalSharedShort") : t("editor.terminalPrivateShort");

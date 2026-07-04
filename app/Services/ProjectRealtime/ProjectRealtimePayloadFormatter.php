@@ -1,6 +1,7 @@
 <?php
 namespace App\Services\ProjectRealtime;
 use App\Models\User;
+use Illuminate\Support\Facades\Storage;
 class ProjectRealtimePayloadFormatter
 {
     public function userDisplayName(User $user): string
@@ -34,7 +35,13 @@ class ProjectRealtimePayloadFormatter
             return null;
         }
 
-        return '/storage/'.ltrim($path, '/');
+        $disk = Storage::disk('public');
+
+        if (! $disk->exists($path)) {
+            return null;
+        }
+
+        return asset('storage/'.ltrim($path, '/'));
     }
     /**
      * @param array<string, array<string, mixed>> $entries

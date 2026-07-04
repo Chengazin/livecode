@@ -50,10 +50,11 @@
           <div class="ace-line-comment-item-head">
             <div class="ace-line-comment-author">
               <img
-                v-if="comment.author_avatar_url"
+                v-if="comment.author_avatar_url && !brokenCommentAvatars[comment.comment_id]"
                 :src="comment.author_avatar_url"
                 :alt="t('profile.avatarAlt')"
                 class="mini-avatar-image"
+                @error="brokenCommentAvatars[comment.comment_id] = true"
               />
               <span
                 v-else
@@ -113,6 +114,7 @@
 </template>
 
 <script setup>
+import { ref } from "vue";
 import {
   useEditorCollaborationContext,
   useEditorLayoutContext,
@@ -143,4 +145,6 @@ const {
   submitAceLineComment,
   toggleAceLineCommentVoiceInput,
 } = useEditorCollaborationContext();
+
+const brokenCommentAvatars = ref({});
 </script>

@@ -36,10 +36,11 @@
           <div v-for="peer in realtimePeers" :key="peer.user_id" class="presence-row">
             <div class="presence-row-head">
               <img
-                v-if="resolvePresenceAvatarUrl(peer)"
+                v-if="resolvePresenceAvatarUrl(peer) && !brokenPresenceAvatars[peer.user_id]"
                 :src="resolvePresenceAvatarUrl(peer)"
                 :alt="t('profile.avatarAlt')"
                 class="mini-avatar-image"
+                @error="brokenPresenceAvatars[peer.user_id] = true"
               />
               <span
                 v-else
@@ -101,10 +102,11 @@
               <small v-if="message.updated_at" class="chat-copy-meta">{{ t("editor.chatEdited") }}</small>
             </div>
             <img
-              v-if="resolveMessageAvatarUrl(message)"
+              v-if="resolveMessageAvatarUrl(message) && !brokenMessageAvatars[message.id]"
               :src="resolveMessageAvatarUrl(message)"
               :alt="t('profile.avatarAlt')"
               class="mini-avatar-image chat-avatar"
+              @error="brokenMessageAvatars[message.id] = true"
             />
             <span
               v-else
@@ -116,10 +118,11 @@
           </template>
           <template v-else>
             <img
-              v-if="resolveMessageAvatarUrl(message)"
+              v-if="resolveMessageAvatarUrl(message) && !brokenMessageAvatars[message.id]"
               :src="resolveMessageAvatarUrl(message)"
               :alt="t('profile.avatarAlt')"
               class="mini-avatar-image chat-avatar"
+              @error="brokenMessageAvatars[message.id] = true"
             />
             <span
               v-else
@@ -183,6 +186,7 @@
 </template>
 
 <script setup>
+import { ref } from "vue";
 import {
   useEditorCollaborationContext,
   useEditorLayoutContext,
@@ -217,4 +221,7 @@ const {
   toggleChatVoiceInput,
   cancelChatMessageEdit,
 } = useEditorCollaborationContext();
+
+const brokenPresenceAvatars = ref({});
+const brokenMessageAvatars = ref({});
 </script>

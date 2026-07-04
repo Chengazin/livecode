@@ -29,8 +29,8 @@
         <label class="field">
           <span>{{ t("register.language") }}</span>
           <select v-model="form.language" required>
-            <option value="rus">Русский</option>
-            <option value="eng">English</option>
+            <option value="rus">{{ t("common.languages.rus") }}</option>
+            <option value="eng">{{ t("common.languages.eng") }}</option>
           </select>
         </label>
 
@@ -61,7 +61,7 @@
 
         <label class="field">
           <span>{{ t("register.verificationCode") }}</span>
-          <input v-model.trim="form.code" type="text" required maxlength="6" placeholder="000000" />
+          <input v-model.trim="form.code" type="text" required maxlength="6" :placeholder="t('register.verificationCodePlaceholder')" />
         </label>
 
         <p v-if="errorMessage" class="error-banner field-row">{{ errorMessage }}</p>
@@ -71,7 +71,7 @@
             {{ loading ? t("register.verifying") : t("register.verify") }}
           </button>
           <button class="btn btn-secondary" type="button" @click="handleResendCode" :disabled="loading || resendCooldown > 0">
-            {{ resendCooldown > 0 ? `${t("register.resendIn")} ${resendCooldown}s` : t("register.resendCode") }}
+            {{ resendCooldown > 0 ? t("register.resendInSeconds", { seconds: resendCooldown }) : t("register.resendCode") }}
           </button>
           <button class="btn btn-ghost" type="button" @click="handleBackToInitialStep">{{ t("common.back") }}</button>
         </div>

@@ -5,10 +5,11 @@
 
       <div class="profile-avatar-preview-wrap">
         <img
-          v-if="previewMode === 'upload' && profile.avatarUrl"
+          v-if="previewMode === 'upload' && profile.avatarUrl && !profileAvatarBroken"
           :src="profile.avatarUrl"
           :alt="t('profile.avatarAlt')"
           class="profile-avatar-image"
+          @error="profileAvatarBroken = true"
         />
         <div v-else class="profile-avatar-preset" :style="{ background: selectedPreset.background }">
           <span>{{ selectedPreset.symbol }}</span>
@@ -69,8 +70,8 @@
         <label class="field">
           <span>{{ t("common.language") }}</span>
           <select v-model="profile.language" required>
-            <option value="rus">rus</option>
-            <option value="eng">eng</option>
+            <option value="rus">{{ t("common.languages.rus") }}</option>
+            <option value="eng">{{ t("common.languages.eng") }}</option>
           </select>
         </label>
 
@@ -201,6 +202,7 @@ const avatarPresetDirty = ref(false);
 const notice = ref("");
 const error = ref("");
 const loggingOut = ref(false);
+const profileAvatarBroken = ref(false);
 
 const isAuthenticated = computed(() => Boolean(getSession().accessToken));
 
@@ -272,6 +274,7 @@ function applyProfile(user) {
   profile.newPasswordConfirmation = "";
   newPasswordVisible.value = false;
   newPasswordConfirmationVisible.value = false;
+  profileAvatarBroken.value = false;
 
   setUser(user || null);
 }

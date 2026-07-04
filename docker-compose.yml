@@ -1,0 +1,66 @@
+networks:
+  livecode:
+    name: livecode-dev_livecode
+    external: true
+  forgejo-net:
+    name: forgejo-net
+    external: true
+
+volumes:
+  forgejo_db_data:
+    external: true
+    name: livecode-dev_forgejo_db_data
+  redis_data:
+    external: true
+    name: livecode-dev_redis_data
+
+services:
+  forgejo-db:
+    image: postgres:15
+    container_name: forgejo-db
+    restart: unless-stopped
+    networks:
+      - livecode
+    environment:
+      POSTGRES_USER: forgejo
+      POSTGRES_DB: forgejo
+      POSTGRES_PASSWORD: forgejopass
+    volumes:
+      - forgejo_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U forgejo"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: livecode-redis
+    restart: unless-stopped
+    networks:
+      - livecode
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  forgejo:
+    image: codeberg.org/forgejo/forgejo:13
+    container_name: livecode-forgejo
+    restart: unless-stopped
+    networks:
+      - livecode
+      - forgejo-net
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./services/forgejo/data:/data
+      - ./docker/forgejo-app.ini:/data/gitea/conf/app.ini
+    depends_on:
+      forgejo-db:
+        condition: service_healthy

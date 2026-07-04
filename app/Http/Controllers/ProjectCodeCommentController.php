@@ -10,6 +10,7 @@ use App\Services\ProjectAccessService;
 use Illuminate\Http\Response;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 
 class ProjectCodeCommentController extends Controller
 {
@@ -199,6 +200,12 @@ class ProjectCodeCommentController extends Controller
             return null;
         }
 
-        return '/storage/'.ltrim($path, '/');
+        $disk = Storage::disk('public');
+
+        if (! $disk->exists($path)) {
+            return null;
+        }
+
+        return asset('storage/'.ltrim($path, '/'));
     }
 }

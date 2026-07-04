@@ -61,6 +61,53 @@ class ProjectRealtimeTest extends TestCase
             ->assertJsonPath('content', 'hello world');
     }
 
+    public function test_editor_sync_preserves_newline_in_insert_text(): void
+    {
+        $owner = $this->createUser('realtime-owner-newline@example.com');
+        $collaborator = $this->createUser('realtime-collaborator-newline@example.com');
+        $project = $this->createProject($owner, 'Realtime newline');
+        $this->addParticipant($project, $collaborator);
+
+        $token = $collaborator->createToken('test')->plainTextToken;
+
+        $state = $this->withToken($token)->postJson('/api/projects/'.$project->project_id.'/realtime/editor-state', [
+            'path' => 'src/main.js',
+            'seed_content' => 'hello',
+            'reset' => true,
+        ]);
+
+        $state
+            ->assertOk()
+            ->assertJsonPath('revision', 0)
+            ->assertJsonPath('content', 'hello');
+
+        $sync = $this->withToken($token)->postJson('/api/projects/'.$project->project_id.'/realtime/editor-sync', [
+            'path' => 'src/main.js',
+            'client_id' => 'client-a',
+            'op_id' => 'op-newline',
+            'base_revision' => 0,
+            'start' => 5,
+            'delete_count' => 0,
+            'insert_text' => "\n",
+        ]);
+
+        $sync
+            ->assertOk()
+            ->assertJsonPath('status', 'ok')
+            ->assertJsonPath('revision', 1)
+            ->assertJsonPath('operation.client_id', 'u'.$collaborator->user_id.':client-a')
+            ->assertJsonPath('operation.operation.insert_text', "\n");
+
+        $nextState = $this->withToken($token)->postJson('/api/projects/'.$project->project_id.'/realtime/editor-state', [
+            'path' => 'src/main.js',
+        ]);
+
+        $nextState
+            ->assertOk()
+            ->assertJsonPath('revision', 1)
+            ->assertJsonPath('content', "hello\n");
+    }
+
     public function test_editor_sync_returns_conflict_with_missing_operations(): void
     {
         $owner = $this->createUser('realtime-owner-conflict@example.com');

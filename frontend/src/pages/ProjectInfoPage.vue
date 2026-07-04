@@ -7,7 +7,7 @@
         <div class="project-info-chips">
           <span class="project-info-chip">{{ t("projectInfo.roleLabel") }}: {{ roleLabel(permissions.effective_role) }}</span>
           <span class="project-info-chip">{{ t("projectInfo.visibilityLabel") }}: {{ project?.is_public ? t("editor.visibilityPublic") : t("editor.visibilityPrivate") }}</span>
-          <span class="project-info-chip">{{ t("projectInfo.branchLabel") }}: <code>{{ project?.forgejo_default_branch || "main" }}</code></span>
+          <span class="project-info-chip">{{ t("projectInfo.branchLabel") }}: <code>{{ project?.forgejo_default_branch || t("projectInfo.defaultBranch") }}</code></span>
         </div>
       </div>
       <div class="project-info-head-actions">
@@ -164,9 +164,9 @@
           <label class="field field-row project-info-period-field">
             <span>{{ t("projectInfo.periodLabel") }}</span>
             <select v-model.number="periodDays" @change="loadInfo">
-              <option :value="7">7d</option>
-              <option :value="30">30d</option>
-              <option :value="90">90d</option>
+              <option :value="7">{{ t("projectInfo.periodDays7") }}</option>
+              <option :value="30">{{ t("projectInfo.periodDays30") }}</option>
+              <option :value="90">{{ t("projectInfo.periodDays90") }}</option>
             </select>
           </label>
         </div>
@@ -1005,7 +1005,7 @@ function buildBranchNameSuggestion(commit) {
     return `${subjectSlug}-${shortHash}`;
   }
 
-  return `branch-${shortHash}`;
+  return `${t("projectInfo.branchPrefix")}-${shortHash}`;
 }
 
 function readGitActionError(errorInput) {

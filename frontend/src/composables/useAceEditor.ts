@@ -76,6 +76,7 @@ export function useAceEditor(options) {
 
     syncingEditor.value = true;
     editorInstance.value.session.setValue(currentText.value || "");
+    editorInstance.value.session.setNewLineMode("unix");
     editorInstance.value.clearSelection();
     syncingEditor.value = false;
   }
@@ -115,9 +116,11 @@ export function useAceEditor(options) {
     });
     editor.session.setUseWrapMode(true);
     editor.session.setUseWorker(false);
+    editor.session.setNewLineMode("unix");
     editor.setTheme(`ace/theme/${editorTheme.value}`);
     editor.session.setMode(`ace/mode/${editorLanguage.value}`);
     editor.session.setValue(currentText.value);
+    editor.session.setNewLineMode("unix");
 
     editor.on("change", (delta) => {
       if (syncingEditor.value) {

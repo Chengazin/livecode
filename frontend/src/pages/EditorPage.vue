@@ -20,7 +20,7 @@
         class="editor-splitter editor-splitter--sidebar"
         :class="{ 'is-active': activeResizePane === 'sidebar' }"
         type="button"
-        aria-label="Resize sidebar"
+        :aria-label="t('editor.ariaResizeSidebar')"
         @pointerdown="startPaneResize('sidebar', $event)"
       />
       <div
@@ -68,7 +68,7 @@
         class="editor-splitter editor-splitter--chat"
         :class="{ 'is-active': activeResizePane === 'chat' }"
         type="button"
-        aria-label="Resize chat panel"
+        :aria-label="t('editor.ariaResizeChatPanel')"
         @pointerdown="startPaneResize('chat', $event)"
       />
       <div
@@ -775,7 +775,7 @@ function downloadFile() {
   const url = window.URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = currentPath.value.split("/").pop() || "code.txt";
+  link.download = currentPath.value.split("/").pop() || t("editor.downloadDefaultFilename");
   document.body.appendChild(link);
   link.click();
   link.remove();

@@ -72,8 +72,8 @@
         <label class="field">
           <span>{{ t("common.language") }}</span>
           <select v-model="userForm.language">
-            <option value="rus">rus</option>
-            <option value="eng">eng</option>
+            <option value="rus">{{ t("common.languages.rus") }}</option>
+            <option value="eng">{{ t("common.languages.eng") }}</option>
           </select>
         </label>
         <div class="admin-editor-actions">

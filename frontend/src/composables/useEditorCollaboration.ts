@@ -127,6 +127,7 @@ let remoteMarkerStyleInjected = false;
 const remoteMarkers = new Map();
 const codeCommentDecoratedRows = new Set();
 let presenceSyncInFlight = false;
+let presenceSyncPending = false;
 let chatLoading = false;
 let codeCommentsLoadRequestId = 0;
 let aceCommentBoundEditor = null;
@@ -956,7 +957,7 @@ function presencePayloadFromEditor() {
 }
 
 async function syncPresenceHeartbeat() {
-  if (!canUseProjectFs.value || !selectedProjectId.value || !isAuthenticated.value || presenceSyncInFlight) {
+  if (!canUseProjectFs.value || !selectedProjectId.value || !isAuthenticated.value) {
     return;
   }
 
@@ -965,6 +966,12 @@ async function syncPresenceHeartbeat() {
     return;
   }
 
+  if (presenceSyncInFlight) {
+    presenceSyncPending = true;
+    return;
+  }
+
+  presenceSyncPending = false;
   presenceSyncInFlight = true;
   try {
     const response = await request({
@@ -979,13 +986,35 @@ async function syncPresenceHeartbeat() {
     // Heartbeat failures are non-fatal and should not interrupt editing.
   } finally {
     presenceSyncInFlight = false;
+    if (presenceSyncPending) {
+      presenceSyncPending = false;
+      void syncPresenceHeartbeat();
+    }
   }
+}
+
+function sendPresenceWhisper() {
+  if (!realtimeChannel || !realtimeChannelSubscribed) {
+    return false;
+  }
+
+  const path = activeProjectPath.value;
+  if (!path) {
+    return false;
+  }
+
+  const payload = presencePayloadFromEditor();
+  payload.user_id = currentUserId.value;
+  realtimeChannel.whisper("presence.updated", payload);
+  return true;
 }
 
 function schedulePresenceSync(delay = 500) {
   if (!canUseProjectFs.value || !liveSyncEnabled.value || !activeProjectPath.value) {
     return;
   }
+
+  presenceSyncPending = true;
 
   if (presenceDebounceTimerId !== null && typeof window !== "undefined") {
     window.clearTimeout(presenceDebounceTimerId);
@@ -999,7 +1028,11 @@ function schedulePresenceSync(delay = 500) {
 
   presenceDebounceTimerId = window.setTimeout(() => {
     presenceDebounceTimerId = null;
-    void syncPresenceHeartbeat();
+    if (realtimeChannelSubscribed && realtimeChannel) {
+      sendPresenceWhisper();
+    } else {
+      void syncPresenceHeartbeat();
+    }
   }, Math.max(0, Number(delay || 0)));
 }
 
@@ -1860,6 +1893,8 @@ function normalizeRemoteOperationEnvelope(rawPayload) {
     op_id: String(payload.op_id || operationRaw.op_id || ""),
     user_id: Number(payload.user_id || 0),
     operation: operationRaw,
+    cursor_row: payload.cursor_row === null || payload.cursor_row === undefined ? undefined : Number(payload.cursor_row),
+    cursor_column: payload.cursor_column === null || payload.cursor_column === undefined ? undefined : Number(payload.cursor_column),
   };
 }
 
@@ -1877,11 +1912,29 @@ function positionToIndex(position) {
   return 0;
 }
 
+function getDeltaText(delta, session) {
+  if (Array.isArray(delta.lines) && delta.lines.length > 0) {
+    const joined = delta.lines.join("\n");
+    if (joined !== "" || delta.start.row === delta.end.row) {
+      return joined;
+    }
+  }
+  if (session && delta.start && delta.end) {
+    const range = new AceRange(
+      delta.start.row, delta.start.column,
+      delta.end.row, delta.end.column
+    );
+    return session.getTextRange(range);
+  }
+  return Array.isArray(delta.lines) ? delta.lines.join("\n") : "";
+}
+
 function deltaToOperation(deltaInput) {
   const delta = deltaInput || {};
   const action = String(delta.action || "");
   const start = positionToIndex(delta.start || { row: 0, column: 0 });
-  const text = Array.isArray(delta.lines) ? delta.lines.join("\n") : "";
+  const session = editorInstance.value?.session;
+  const text = getDeltaText(delta, session);
 
   if (action === "insert") {
     return {
@@ -1975,7 +2028,7 @@ function applyRemoteEditorOperation(rawPayload) {
     return;
   }
 
-  if (editorSyncInflightOp && envelope.revision > (editorSyncRevision.value + 1)) {
+  if (envelope.revision > (editorSyncRevision.value + 1)) {
     editorDeferredRemoteOps.push(envelope);
     editorDeferredRemoteOps.sort((left, right) => left.revision - right.revision);
     return;
@@ -2033,6 +2086,18 @@ function applyRemoteEditorOperation(rawPayload) {
 
   applyEditorTextOperation(transformedRemote);
   editorSyncRevision.value = envelope.revision;
+  applyDeferredRemoteEditorOperations();
+
+  if (envelope.user_id && envelope.user_id !== currentUserId.value) {
+    const existingPeer = realtimePeers.value.find((p) => p.user_id === envelope.user_id);
+    if (existingPeer) {
+      upsertPresencePeer({
+        ...existingPeer,
+        cursor_row: envelope.cursor_row !== undefined ? envelope.cursor_row : existingPeer.cursor_row,
+        cursor_column: envelope.cursor_column !== undefined ? envelope.cursor_column : existingPeer.cursor_column,
+      });
+    }
+  }
 }
 
 function applyDeferredRemoteEditorOperations() {
@@ -2041,12 +2106,20 @@ function applyDeferredRemoteEditorOperations() {
   }
 
   editorDeferredRemoteOps.sort((left, right) => left.revision - right.revision);
-  const ready = editorDeferredRemoteOps.filter((entry) => entry.revision > editorSyncRevision.value);
-  editorDeferredRemoteOps = [];
 
-  ready.forEach((operationEnvelope) => {
-    applyRemoteEditorOperation(operationEnvelope);
-  });
+  while (editorDeferredRemoteOps.length > 0) {
+    const nextRevision = editorSyncRevision.value + 1;
+    const index = editorDeferredRemoteOps.findIndex(
+      (entry) => entry.revision === nextRevision
+    );
+
+    if (index === -1) {
+      break;
+    }
+
+    const entry = editorDeferredRemoteOps.splice(index, 1)[0];
+    applyRemoteEditorOperation(entry);
+  }
 }
 
 function resetEditorSyncState() {
@@ -2303,6 +2376,7 @@ async function flushEditorSyncQueue() {
   };
 
   try {
+    const editorCursor = editorInstance.value?.getCursorPosition?.();
     const payload = {
       path: activeProjectPath.value,
       client_id: nextOperation.operation.client_id,
@@ -2311,6 +2385,8 @@ async function flushEditorSyncQueue() {
       start: nextOperation.operation.start,
       delete_count: nextOperation.operation.delete_count,
       insert_text: nextOperation.operation.insert_text,
+      cursor_row: editorCursor ? Number(editorCursor.row) : undefined,
+      cursor_column: editorCursor ? Number(editorCursor.column) : undefined,
     };
 
     const response = await request({
@@ -2564,6 +2640,10 @@ async function startRealtimeSession(options = {}) {
     applyRemoteEditorOperation(payload?.operation || payload);
   });
 
+  channel.listenForWhisper("presence.updated", (payload) => {
+    upsertPresencePeer(payload);
+  });
+
   channel.listen(".file_created", () => {
     void loadTree();
   });
@@ -2594,7 +2674,9 @@ async function startRealtimeSession(options = {}) {
     }, 8000);
 
     presenceIntervalTimerId = window.setInterval(() => {
-      void syncPresenceHeartbeat();
+      if (!realtimeChannelSubscribed) {
+        void syncPresenceHeartbeat();
+      }
     }, 9000);
 
     presencePruneTimerId = window.setInterval(() => {

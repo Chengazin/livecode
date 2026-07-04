@@ -16,6 +16,12 @@ app/storage/
 /public/storage
 /public/hot
 
+# Services (native Docker replacement)
+services/**/bin/
+services/**/data/
+services/**/*.log
+.dev-pids.json
+
 # Laravel 5 & Lumen specific with changed public path
 public_html/storage
 public_html/hot

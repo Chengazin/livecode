@@ -191,7 +191,7 @@ class ProfileController extends Controller
             return null;
         }
 
-        return '/storage/'.ltrim($user->avatar_path, '/');
+        return asset('storage/'.ltrim($user->avatar_path, '/'));
     }
 
     private function deleteAvatarFile(User $user): void
