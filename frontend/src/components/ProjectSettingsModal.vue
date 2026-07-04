@@ -499,12 +499,10 @@ function formatShortDate(value) {
 }
 
 function handleCloseStart() {
-  // Start closing animation
   isClosing.value = true;
 }
 
 function handleAnimationEnd(event) {
-  // Only emit close when the overlay animation ends and we're closing
   if (isClosing.value && event.target.classList?.contains("modal-overlay")) {
     isClosing.value = false;
     emit("close");

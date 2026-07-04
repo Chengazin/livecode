@@ -1005,7 +1005,9 @@ function buildBranchNameSuggestion(commit) {
     return `${subjectSlug}-${shortHash}`;
   }
 
-  return `${t("projectInfo.branchPrefix")}-${shortHash}`;
+      periodDays7: "7d",
+      periodDays30: "30d",
+      periodDays90: "90d",
 }
 
 function readGitActionError(errorInput) {

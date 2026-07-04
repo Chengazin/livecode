@@ -113,6 +113,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('project-participants', ProjectParticipantController::class);
     Route::apiResource('project-invitations', ProjectInvitationController::class);
 
+
     // Notifications
     Route::get('notifications', [NotificationController::class, 'index']);
     Route::get('notifications/unread-count', [NotificationController::class, 'unreadCount']);

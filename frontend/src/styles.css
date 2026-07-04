@@ -1090,7 +1090,6 @@ select:focus {
 .admin-head-actions {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
   flex-wrap: wrap;
 }
 
@@ -2038,7 +2037,6 @@ select:focus {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 8px;
   flex-wrap: wrap;
 }
 
@@ -2752,7 +2750,6 @@ select:focus {
   min-width: 34px;
   height: 34px;
 }
-
 .realtime-toggle {
   display: inline-flex;
   align-items: center;
@@ -3387,7 +3384,6 @@ select:focus {
 .project-settings-pane-actions {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
   flex-wrap: wrap;
 }
 

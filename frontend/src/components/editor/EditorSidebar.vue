@@ -47,15 +47,226 @@
           <path d="M6 18a3 3 0 1 0 3 3" />
           <path d="M15 6a3 3 0 1 0 3 3" />
           <path d="M18 9v4" />
-          <path d="M12 13h6" />
-          <path d="M12 13a3 3 0 1 0 0 6" />
+          <path d="M18 18a3 3 0 1 0 3 3" />
+          <path d="M21 18v4" />
+        </svg>
+      </button>
+
+      <button
+        v-if="isAuthenticated && isProjectRoute && canManageProjectSettings"
+        class="editor-activity-btn"
+        :class="{ 'is-active': activePanel === 'settings' }"
+        type="button"
+        :title="t('editor.projectSettings')"
+        :aria-label="t('editor.projectSettings')"
+        @click="setActivePanel('settings')"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1Z" />
         </svg>
       </button>
     </nav>
 
-    <div v-if="isContentVisible" class="editor-sidebar-content">
-      <template v-if="activePanel === 'explorer'">
-        <section class="sidebar-block">
+    <div class="editor-sidebar-content">
+      <!-- File Explorer -->
+      <section v-if="activePanel === 'explorer'" class="sidebar-block">
+        <div class="sidebar-head">
+          <h2>{{ t("editor.files") }}</h2>
+          <button class="btn btn-sm btn-ghost" type="button" @click="goToProjects">{{ t("editor.projectSettings") }}</button>
+        </div>
+        <FileTree
+          :t="t"
+          :can-use-project-fs="canUseProjectFs"
+          :sync-busy="syncBusy"
+          :download-busy="downloadBusy"
+          :can-download-selected-folder="canDownloadSelectedFolder"
+          :downloading-scope="downloadingScope"
+          :tree-loading="treeLoading"
+          :flat-tree="flatTree"
+          :node-busy="nodeBusy"
+          :move-busy="moveBusy"
+          :can-move-selected-to-root="canMoveSelectedToRoot"
+          :new-node-kind="newNodeKind"
+          :new-node-path="newNodePath"
+          :new-node-input-ref="newNodeInputRef"
+          :is-root-drop-target="isRootDropTarget"
+          :selected-tree-type="selectedTreeType"
+          :is-project-mode="isProjectMode"
+          :active-project-path="activeProjectPath"
+          :selected-tree-path="selectedTreePath"
+          :dragged-path="draggedPath"
+          :drop-target-path="dropTargetPath"
+          :is-expanded="isExpanded"
+          @start-create-node="emit('start-create-node', $event)"
+          @move-selected-to-root="emit('move-selected-to-root')"
+          @update:newNodePath="emit('update:newNodePath', $event)"
+          @cancel-create-node="emit('cancel-create-node')"
+          @submit-create-node="emit('submit-create-node')"
+          @select-project-root="emit('select-project-root')"
+          @root-drag-over="emit('root-drag-over', $event)"
+          @root-drag-leave="emit('root-drag-leave')"
+          @root-drop="emit('root-drop', $event)"
+          @select-tree-item="emit('select-tree-item', $event)"
+          @tree-row-drag-over="emit('tree-row-drag-over', $event)"
+          @tree-row-drag-leave="emit('tree-row-drag-leave', $event)"
+          @tree-row-drop="emit('tree-row-drop', $event)"
+          @tree-drag-start="emit('tree-drag-start', $event)"
+          @reset-drag-state="emit('reset-drag-state')"
+          @click-tree-item="emit('click-tree-item', $event)"
+          @rename-tree-item="emit('rename-tree-item', $event)"
+          @remove-tree-item="emit('remove-tree-item', $event)"
+        />
+      </section>
+
+      <!-- Collaborators panel -->
+      <section v-if="activePanel === 'collaborators'" class="sidebar-block">
+        <div class="sidebar-head">
+          <h2>{{ t("editor.collaborators") }}</h2>
+        </div>
+        <div class="sidebar-padded-content">
+          <div v-if="participantsLoading" class="muted-text">{{ t("editor.loadingCollaborators") }}</div>
+          <div v-else-if="participants.length === 0" class="muted-text">{{ t("editor.noCollaborators") }}</div>
+          <ul v-else class="conn-list">
+            <li v-for="participant in participants" :key="participant.participant_id">
+              <span class="conn-avatar" :style="resolveParticipantAvatarStyle(participant)">
+                <img v-if="resolveParticipantAvatarUrl(participant)" :src="resolveParticipantAvatarUrl(participant)" alt="" />
+              </span>
+              <span class="conn-name">{{ participant.user?.name || t("projectInfo.unknownAuthor") }}</span>
+              <span class="conn-role-badge">{{ roleBadgeLabel(participant.role) }}</span>
+              <button v-if="canManageProjectSettings" class="btn btn-sm btn-ghost conn-remove" type="button" @click="emit('remove-collaborator', participant.participant_id)">
+                {{ t("editor.removeCollaborator") }}
+              </button>
+            </li>
+          </ul>
+          <form v-if="canManageProjectSettings" class="inline-conn-form" @submit.prevent="emit('add-collaborator-by-id', collaboratorUserId)">
+            <input v-model="collaboratorUserId" type="number" min="1" :placeholder="t('editor.collaboratorUserIdPlaceholder')" />
+            <button class="btn btn-sm btn-secondary" type="submit" :disabled="collaboratorBusy">
+              {{ collaboratorBusy ? t("common.saving") : t("editor.addCollaborator") }}
+            </button>
+          </form>
+          <button v-if="canManageProjectSettings" class="btn btn-sm btn-ghost" type="button" :disabled="inviteBusy" @click="emit('create-invite-link')">
+            {{ inviteBusy ? t("common.saving") : t("editor.generateInviteLink") }}
+          </button>
+          <div v-if="inviteLink">
+            <input :value="inviteLink" readonly @click="emit('copy-invite-link')" />
+          </div>
+        </div>
+      </section>
+
+      <!-- Git panel -->
+      <section v-if="activePanel === 'git'" class="sidebar-block">
+        <div class="sidebar-head">
+          <h2>{{ t("editor.gitWork") }}</h2>
+        </div>
+        <div class="sidebar-padded-content">
+          <template v-if="!isAuthenticated">
+            <p class="muted-text">{{ t("editor.loginRequiredForgejo") }}</p>
+          </template>
+          <template v-else-if="!isProjectRoute">
+            <p class="muted-text">{{ t("editor.selectProjectFirst") }}</p>
+          </template>
+          <template v-else>
+            <div v-if="!forgejoAccountConnected" class="forgejo-step">
+              <span class="forgejo-step-badge is-active">1</span>
+              <strong>{{ t("editor.gitStepAccount") }}</strong>
+              <p class="muted-text">{{ t("editor.gitStepAccountHint") }}</p>
+              <button class="btn btn-sm btn-secondary" type="button" :disabled="forgejoBusy" @click="emit('start-forgejo-connect')">
+                {{ forgejoBusy ? t("common.loading") : t("editor.connectAccount") }}
+              </button>
+            </div>
+            <div v-else-if="!hasForgejoRepo" class="forgejo-step">
+              <span class="forgejo-step-badge is-done">✓</span>
+              <strong>{{ t("editor.gitStepAccount") }}</strong>
+              <button class="btn btn-sm btn-ghost" type="button" :disabled="forgejoBusy" @click="emit('start-forgejo-connect')">
+                {{ t("editor.reconnectAccount") }}
+              </button>
+              <div class="forgejo-step">
+                <span class="forgejo-step-badge is-active">2</span>
+                <strong>{{ t("editor.gitStepRepo") }}</strong>
+                <p class="muted-text">{{ t("editor.gitStepRepoHint") }}</p>
+                <label class="field-label">{{ t("editor.mode") }}</label>
+                <select v-model="forgejoMode" class="forgejo-mode-select" @change="emit('update:forgejoMode', forgejoMode)">
+                  <option value="create">{{ t("editor.createRepo") }}</option>
+                  <option value="existing">{{ t("editor.existingRepo") }}</option>
+                </select>
+                <input v-if="forgejoMode === 'create'" v-model="forgejoRepoName" type="text" :placeholder="t('editor.repositoryNamePlaceholder')" maxlength="100" @change="emit('update:forgejoRepoName', forgejoRepoName)" />
+                <input v-else v-model="forgejoRepoUrl" type="text" :placeholder="t('editor.repositoryUrlPlaceholder')" maxlength="500" @change="emit('update:forgejoRepoUrl', forgejoRepoUrl)" />
+                <button class="btn btn-sm btn-secondary" type="button" :disabled="forgejoBusy" @click="emit('connect-project-forgejo')">
+                  {{ forgejoBusy ? t("common.saving") : t("editor.connectProjectRepo") }}
+                </button>
+              </div>
+            </div>
+            <div v-else class="forgejo-connected">
+              <div class="forgejo-step">
+                <span class="forgejo-step-badge is-done">✓</span>
+                <strong>{{ t("editor.gitStepAccount") }}</strong>
+                <button class="btn btn-sm btn-ghost" type="button" :disabled="forgejoBusy" @click="emit('start-forgejo-connect')">
+                  {{ t("editor.reconnectAccount") }}
+                </button>
+              </div>
+              <div class="forgejo-step">
+                <span class="forgejo-step-badge is-done">✓</span>
+                <strong>{{ t("editor.gitStepRepo") }}</strong>
+                <p class="muted-text">
+                  <a v-if="forgejoRepoHtmlUrl" :href="forgejoRepoFullName ? forgejoGraphUrl : '#'" target="_blank" rel="noopener noreferrer">
+                    <code>{{ forgejoRepoFullName || t('editor.repositoryUnknown') }}</code>
+                  </a>
+                  <code v-else>{{ forgejoRepoFullName || t('editor.repositoryUnknown') }}</code>
+                </p>
+                <button class="btn btn-sm btn-ghost" type="button" :disabled="forgejoBusy" @click="emit('connect-project-forgejo')">
+                  {{ t("editor.rebindProjectRepo") }}
+                </button>
+              </div>
+              <div class="forgejo-step">
+                <span class="forgejo-step-badge is-active">3</span>
+                <strong>{{ t("editor.gitStepActions") }}</strong>
+                <p class="muted-text">{{ t("editor.gitStepActionsHint") }}</p>
+                <details class="forgejo-push-block">
+                  <summary>{{ t("editor.pushToForgejo") }}</summary>
+                  <input v-model="forgejoMessage" type="text" :placeholder="t('editor.manualSavePlaceholder')" maxlength="255" @change="emit('update:forgejoMessage', forgejoMessage)" />
+                  <button class="btn btn-sm btn-secondary" type="button" :disabled="forgejoBusy" @click="emit('push-to-forgejo')">
+                    {{ forgejoBusy ? t("common.saving") : t("editor.pushToForgejo") }}
+                  </button>
+                </details>
+                <details v-if="canCreatePullRequest" class="forgejo-pr-block">
+                  <summary>{{ t("editor.createPullRequest") }}</summary>
+                  <input v-model="forgejoPrTitle" type="text" :placeholder="t('editor.pullRequestTitlePlaceholder')" maxlength="255" @change="emit('update:forgejoPrTitle', forgejoPrTitle)" />
+                  <input v-model="forgejoPrMessage" type="text" :placeholder="t('editor.pullRequestCommitMessage')" maxlength="255" @change="emit('update:forgejoPrMessage', forgejoPrMessage)" />
+                  <textarea v-model="forgejoPrBody" rows="3" :placeholder="t('editor.pullRequestDescriptionPlaceholder')" maxlength="2000" @change="emit('update:forgejoPrBody', forgejoPrBody)" />
+                  <button class="btn btn-sm btn-secondary" type="button" :disabled="forgejoBusy" @click="emit('create-pull-request-in-forgejo')">
+                    {{ forgejoBusy ? t("common.creating") : t("editor.createPullRequest") }}
+                  </button>
+                </details>
+                <p v-else class="muted-text">{{ t("editor.pullRequestUnavailable") }}</p>
+              </div>
+            </div>
+          </template>
+        </div>
+      </section>
+
+      <!-- Settings panel -->
+      <section v-if="activePanel === 'settings'" class="sidebar-block">
+        <div class="sidebar-head">
+          <h2>{{ t("editor.projectSettings") }}</h2>
+        </div>
+        <div class="sidebar-padded-content">
+          <details class="forgejo-push-block">
+            <summary>{{ t("editor.projectSettingsTabSettings") }}</summary>
+            <button class="btn btn-sm btn-secondary" type="button" @click="emit('open-project-settings-modal')">
+              {{ t("editor.projectSettings") }}
+            </button>
+          </details>
+          <details class="forgejo-push-block">
+            <summary>{{ t("editor.projectSettingsTabTesting") }}</summary>
+            <button class="btn btn-sm btn-secondary" type="button" @click="emit('open-project-settings-modal')">
+              {{ t("editor.projectSettingsTabTesting") }}
+            </button>
+          </details>
+        </div>
+      </section>
+    </div>
+  </div>
           <div class="sidebar-head">
             <h2>{{ workspaceTitle }}</h2>
             <div class="sidebar-head-actions">
@@ -343,7 +554,6 @@
         </details>
       </section>
     </div>
-  </div>
 </template>
 
 <script setup>
@@ -619,4 +829,3 @@ function resolveParticipantAvatarStyle(participant) {
   return resolveAvatarStyle(participant?.user?.avatar_preset);
 }
 </script>
-

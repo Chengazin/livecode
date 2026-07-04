@@ -120,7 +120,6 @@ export function useAceEditor(options) {
     editor.setTheme(`ace/theme/${editorTheme.value}`);
     editor.session.setMode(`ace/mode/${editorLanguage.value}`);
     editor.session.setValue(currentText.value);
-    editor.session.setNewLineMode("unix");
 
     editor.on("change", (delta) => {
       if (syncingEditor.value) {

@@ -13,6 +13,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 class ProjectRealtimeController extends Controller
 {
+
     public function heartbeat(
         Request $request,
         int $projectId,
@@ -212,4 +213,5 @@ class ProjectRealtimeController extends Controller
             // Broadcast availability should not break API write paths.
         }
     }
+
 }
